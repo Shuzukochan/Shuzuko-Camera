@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📸 Replacement Image"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/info_text"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/rotation_label"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <RadioGroup
+            android:id="@+id/radioGroupRotation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <RadioButton
+                android:id="@+id/radioRotate0"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="0° (No rotation)"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/radioRotate270"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="270° (←)" />
+
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/scale_mode_label"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <RadioGroup
+            android:id="@+id/radioGroupScaleMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="8dp">
+
+            <RadioButton
+                android:id="@+id/radioScaleCenterCrop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Center Crop (recommended - no distortion)"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/radioScaleStretch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Stretch to fit (may distort)" />
+
+        </RadioGroup>
+
+        <Button
+            android:id="@+id/btnSelectImage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/select_image" />
+
+        <TextView
+            android:id="@+id/txtImageStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/image_status"
+            android:textSize="14sp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/txtVideoStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/video_status"
+            android:textSize="14sp"
+            android:layout_marginBottom="8dp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#CCCCCC"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⚙️ Settings"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TableLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="visible">
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:minHeight="48dp">
+
+                <Switch
+                    android:id="@+id/switch1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:text="@string/switch1" />
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:minHeight="48dp">
+
+                <Switch
+                    android:id="@+id/switch2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:minHeight="48dp"
+                    android:text="@string/switch2" />
+
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:minHeight="48dp">
+
+                <Switch
+                    android:id="@+id/switch3"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:minHeight="48dp"
+                    android:text="@string/switch3" />
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:minHeight="48dp">
+
+                <Switch
+                    android:id="@+id/switch4"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:minHeight="48dp"
+                    android:text="@string/switch4" />
+            </TableRow>
+
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:minHeight="48dp">
+
+                <Switch
+                    android:id="@+id/switch5"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:minHeight="48dp"
+                    android:text="@string/switch5" />
+            </TableRow>
+
+        </TableLayout>
+    </LinearLayout>
+</ScrollView>
