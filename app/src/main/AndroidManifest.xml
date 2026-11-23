@@ -31,6 +31,12 @@
             </intent-filter>
         </receiver>
 
+        <provider
+            android:name=".ShuzukoFileProvider"
+            android:authorities="com.app.shuzukocamera.provider"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
         <meta-data
             android:name="xposedmodule"
             android:value="true" />

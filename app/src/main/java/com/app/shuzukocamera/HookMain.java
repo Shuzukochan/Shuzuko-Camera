@@ -28,6 +28,7 @@ import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
@@ -150,6 +151,98 @@ public class HookMain implements IXposedHookLoadPackage {
         } catch (Throwable ignored) {}
     }
 
+    public static File getVirtualFile(String fileName) {
+        String dcimPath = Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/";
+        File dcimFile = new File(dcimPath + fileName);
+
+        // 1. If readable in DCIM, use DCIM directly!
+        if (dcimFile.exists() && dcimFile.canRead() && (dcimFile.isDirectory() || dcimFile.length() > 0 || fileName.endsWith(".jpg"))) {
+            video_path = dcimPath;
+            return dcimFile;
+        }
+
+        // 2. If DCIM is not accessible (Scoped Storage / no storage permissions),
+        // use the target app's own private directory and sync via ContentProvider
+        if (toast_content != null) {
+            try {
+                File extFilesDir = toast_content.getExternalFilesDir(null);
+                if (extFilesDir != null) {
+                    File privateDir = new File(extFilesDir, "ShuzukoCamera");
+                    if (!privateDir.exists()) {
+                        privateDir.mkdirs();
+                    }
+                    File privateFile = new File(privateDir, fileName);
+
+                    // Check ContentProvider for metadata (lastModified and size)
+                    android.net.Uri contentUri = android.net.Uri.parse("content://com.app.shuzukocamera.provider/" + fileName);
+                    long remoteTime = 0;
+                    long remoteSize = -1;
+                    boolean providerHasFile = false;
+
+                    try (android.database.Cursor cursor = toast_content.getContentResolver().query(contentUri, null, null, null, null)) {
+                        if (cursor != null && cursor.moveToFirst()) {
+                            providerHasFile = true;
+                            int timeIdx = cursor.getColumnIndex("last_modified");
+                            int sizeIdx = cursor.getColumnIndex("_size");
+                            if (timeIdx >= 0) remoteTime = cursor.getLong(timeIdx);
+                            if (sizeIdx >= 0) remoteSize = cursor.getLong(sizeIdx);
+                        }
+                    } catch (Throwable ignored) {}
+
+                    // Determine if we need to sync from provider
+                    boolean needSync = false;
+                    if (providerHasFile) {
+                        if (!privateFile.exists()) {
+                            needSync = true;
+                        } else if (remoteSize >= 0 && privateFile.length() != remoteSize && !fileName.endsWith(".jpg")) {
+                            needSync = true;
+                        } else if (remoteTime > 0 && Math.abs(remoteTime - privateFile.lastModified()) > 1000) {
+                            needSync = true;
+                        }
+                    } else if (!dcimFile.exists()) {
+                        // File does NOT exist on provider and does NOT exist in DCIM
+                        // If it's a toggle file (like disable.jpg or no_toast.jpg) that was removed, clean up private copy
+                        if (privateFile.exists() && fileName.endsWith(".jpg")) {
+                            privateFile.delete();
+                        }
+                    }
+
+                    if (needSync) {
+                        try (android.os.ParcelFileDescriptor pfd = toast_content.getContentResolver().openFileDescriptor(contentUri, "r")) {
+                            if (pfd != null) {
+                                try (FileInputStream in = new FileInputStream(pfd.getFileDescriptor());
+                                     FileOutputStream out = new FileOutputStream(privateFile)) {
+                                    byte[] buf = new byte[65536];
+                                    int len;
+                                    while ((len = in.read(buf)) > 0) {
+                                        out.write(buf, 0, len);
+                                    }
+                                    out.flush();
+                                }
+                                if (remoteTime > 0) {
+                                    privateFile.setLastModified(remoteTime);
+                                }
+                                XposedBridge.log("[ShuzukoCamera] Synced " + fileName + " via ContentProvider (" + privateFile.length() + " bytes)");
+                            }
+                        } catch (Throwable t) {
+                            XposedBridge.log("[ShuzukoCamera] Provider sync error for " + fileName + ": " + t.getMessage());
+                        }
+                    }
+
+                    if (privateFile.exists() && (privateFile.length() > 0 || fileName.endsWith(".jpg"))) {
+                        video_path = privateDir.getAbsolutePath() + "/";
+                        return privateFile;
+                    }
+                }
+            } catch (Throwable t) {
+                XposedBridge.log("[ShuzukoCamera] getVirtualFile error: " + t.getMessage());
+            }
+        }
+
+        video_path = dcimPath;
+        return dcimFile;
+    }
+
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Exception {
         currentPackageName = lpparam.packageName;
         XposedHelpers.findAndHookMethod("android.hardware.Camera", lpparam.classLoader, "setPreviewTexture", SurfaceTexture.class, new XC_MethodHook() {
@@ -163,9 +256,9 @@ public class HookMain implements IXposedHookLoadPackage {
                         saveCameraResolution(w, h, currentPackageName, "Camera1-setPreviewTexture");
                     }
                 } catch (Throwable ignored) {}
-                File file = new File(video_path + "virtual.mp4");
+                File file = getVirtualFile("virtual.mp4");
                 if (file.exists()) {
-                    File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                    File control_file = getVirtualFile("disable.jpg");
                     if (control_file.exists()){
                         return;
                     }
@@ -197,7 +290,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     }
                     param.args[0] = fake_SurfaceTexture;
                 } else {
-                    File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                    File toast_control = getVirtualFile("no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
@@ -221,7 +314,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 }
                 c2_state_cb = (CameraDevice.StateCallback) param.args[1];
                 c2_state_callback = param.args[1].getClass();
-                File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                File control_file = getVirtualFile("disable.jpg");
                 if (control_file.exists()) {
                     return;
                 }
@@ -252,8 +345,8 @@ public class HookMain implements IXposedHookLoadPackage {
                     XposedBridge.log("[ShuzukoCamera] Characteristics error: " + t.getMessage());
                 }
 
-                File file = new File(video_path + "virtual.mp4");
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                File file = getVirtualFile("virtual.mp4");
+                File toast_control = getVirtualFile("no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
                 if (!file.exists()) {
                     if (toast_content != null && need_to_show_toast) {
@@ -282,7 +375,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         return;
                     }
                     c2_state_cb = (CameraDevice.StateCallback) param.args[2];
-                    File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                    File control_file = getVirtualFile("disable.jpg");
                     if (control_file.exists()) {
                         return;
                     }
@@ -313,8 +406,8 @@ public class HookMain implements IXposedHookLoadPackage {
                         XposedBridge.log("[ShuzukoCamera] Characteristics error: " + t.getMessage());
                     }
 
-                    File file = new File(video_path + "virtual.mp4");
-                    File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                    File file = getVirtualFile("virtual.mp4");
+                    File toast_control = getVirtualFile("no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (!file.exists()) {
                         if (toast_content != null && need_to_show_toast) {
@@ -388,7 +481,7 @@ public class HookMain implements IXposedHookLoadPackage {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 super.beforeHookedMethod(param);
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                File toast_control = getVirtualFile("no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
                 XposedBridge.log("[ShuzukoCamera] [record] " + lpparam.packageName);
                 if (toast_content != null && need_to_show_toast) {
@@ -411,62 +504,13 @@ public class HookMain implements IXposedHookLoadPackage {
                     } catch (Exception ee) {
                         XposedBridge.log("[ShuzukoCamera] " + ee.toString());
                     }
-                    File force_private = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/private_dir.jpg");
                     if (toast_content != null) {
-                        int auth_statue = 0;
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        new Thread(() -> {
                             try {
-                                auth_statue += (toast_content.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) + 1);
-                            } catch (Exception ee) {
-                                XposedBridge.log("[ShuzukoCamera] [permission-check] " + ee.toString());
-                            }
-                            try {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                    auth_statue += (toast_content.checkSelfPermission(Manifest.permission.MANAGE_EXTERNAL_STORAGE) + 1);
-                                }
-                            } catch (Exception ee) {
-                                XposedBridge.log("[ShuzukoCamera] [permission-check] " + ee.toString());
-                            }
-                        }else {
-                            if (toast_content.checkCallingPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED ){
-                                auth_statue = 2;
-                            }
-                        }
-                        if (auth_statue < 1 || force_private.exists()) {
-                            File shown_file = new File(toast_content.getExternalFilesDir(null).getAbsolutePath() + "/ShuzukoCamera/");
-                            if ((!shown_file.isDirectory()) && shown_file.exists()) {
-                                shown_file.delete();
-                            }
-                            if (!shown_file.exists()) {
-                                shown_file.mkdir();
-                            }
-                            shown_file = new File(toast_content.getExternalFilesDir(null).getAbsolutePath() + "/ShuzukoCamera/" + "has_shown");
-                            File toast_force_file = new File(Environment.getExternalStorageDirectory().getPath()+ "/DCIM/ShuzukoCamera/force_show.jpg");
-                            if ((!lpparam.packageName.equals(BuildConfig.APPLICATION_ID)) && ((!shown_file.exists()) || toast_force_file.exists())) {
-                                try {
-                                    Toast.makeText(toast_content, "[Shuzuko Camera] Ứng dụng " + lpparam.packageName + " chưa có quyền bộ nhớ.\nĐã chuyển hướng lưu trữ sang thư mục riêng của app.", Toast.LENGTH_SHORT).show();
-                                    FileOutputStream fos = new FileOutputStream(toast_content.getExternalFilesDir(null).getAbsolutePath() + "/ShuzukoCamera/" + "has_shown");
-                                    String info = "shown";
-                                    fos.write(info.getBytes());
-                                    fos.flush();
-                                    fos.close();
-                                } catch (Exception e) {
-                                    XposedBridge.log("【VCAM】[switch-dir]" + e.toString());
-                                }
-                            }
-                            video_path = toast_content.getExternalFilesDir(null).getAbsolutePath() + "/ShuzukoCamera/";
-                        }else {
-                            video_path = Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/";
-                        }
-                    } else {
-                        video_path = Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/";
-                        File uni_DCIM_path = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/");
-                        if (uni_DCIM_path.canWrite()) {
-                            File uni_ShuzukoCamera_path = new File(video_path);
-                            if (!uni_ShuzukoCamera_path.exists()) {
-                                uni_ShuzukoCamera_path.mkdir();
-                            }
-                        }
+                                getVirtualFile("virtual.mp4");
+                                getVirtualFile("1000.bmp");
+                            } catch (Throwable ignored) {}
+                        }).start();
                     }
                 }
             }
@@ -483,20 +527,20 @@ public class HookMain implements IXposedHookLoadPackage {
                         saveCameraResolution(w, h, currentPackageName, "Camera1-startPreview");
                     }
                 } catch (Throwable ignored) {}
-                File file = new File(video_path + "virtual.mp4");
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                File file = getVirtualFile("virtual.mp4");
+                File toast_control = getVirtualFile("no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
                 if (!file.exists()) {
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh ảo!\nĐường dẫn: " + video_path + "virtual.mp4", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh ảo!\nHãy mở app Shuzuko Camera để chọn ảnh/video thay thế.", Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
                             XposedBridge.log("[ShuzukoCamera][toast]" + ee.toString());
                         }
                     }
                     return;
                 }
-                File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                File control_file = getVirtualFile("disable.jpg");
                 if (control_file.exists()) {
                     return;
                 }
@@ -516,7 +560,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         return;
                     }
                     mplayer1.setSurface(ori_holder.getSurface());
-                    File sfile = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no-silent.jpg");
+                    File sfile = getVirtualFile("no-silent.jpg");
                     if (!(sfile.exists() && (!is_someone_playing))) {
                         mplayer1.setVolume(0, 0);
                         is_someone_playing = false;
@@ -533,7 +577,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     });
 
                     try {
-                        mplayer1.setDataSource(video_path + "virtual.mp4");
+                        mplayer1.setDataSource(file.getAbsolutePath());
                         mplayer1.prepare();
                     } catch (IOException e) {
                         XposedBridge.log("[ShuzukoCamera] " + e.toString());
@@ -558,7 +602,7 @@ public class HookMain implements IXposedHookLoadPackage {
 
                     mMediaPlayer.setSurface(mSurface);
 
-                    File sfile = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no-silent.jpg");
+                    File sfile = getVirtualFile("no-silent.jpg");
                     if (!(sfile.exists() && (!is_someone_playing))) {
                         mMediaPlayer.setVolume(0, 0);
                         is_someone_playing = false;
@@ -575,7 +619,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     });
 
                     try {
-                        mMediaPlayer.setDataSource(video_path + "virtual.mp4");
+                        mMediaPlayer.setDataSource(file.getAbsolutePath());
                         mMediaPlayer.prepare();
                     } catch (IOException e) {
                         XposedBridge.log("[ShuzukoCamera] " + e.toString());
@@ -588,11 +632,11 @@ public class HookMain implements IXposedHookLoadPackage {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 XposedBridge.log("[ShuzukoCamera] Thêm SurfaceView xem trước");
-                File file = new File(video_path + "virtual.mp4");
+                File file = getVirtualFile("virtual.mp4");
                 if (!file.exists()) {
                     return;
                 }
-                File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                File control_file = getVirtualFile("disable.jpg");
                 if (control_file.exists()) {
                     return;
                 }
@@ -629,14 +673,14 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (param.thisObject == null) {
                     return;
                 }
-                File file = new File(video_path + "virtual.mp4");
+                File file = getVirtualFile("virtual.mp4");
                 if (!file.exists()) {
                     return;
                 }
                 if (param.args[0].equals(c2_virtual_surface)) {
                     return;
                 }
-                File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                File control_file = getVirtualFile("disable.jpg");
                 if (control_file.exists()) {
                     return;
                 }
@@ -674,11 +718,11 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (param.thisObject == null) {
                     return;
                 }
-                File file = new File(video_path + "virtual.mp4");
+                File file = getVirtualFile("virtual.mp4");
                 if (!file.exists()) {
                     return;
                 }
-                File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                File control_file = getVirtualFile("disable.jpg");
                 if (control_file.exists()) {
                     return;
                 }
@@ -710,12 +754,12 @@ public class HookMain implements IXposedHookLoadPackage {
                     return;
                 }
                 c2_builder = (CaptureRequest.Builder) param.thisObject;
-                File file = new File(video_path + "virtual.mp4");
+                File file = getVirtualFile("virtual.mp4");
                 if (!file.exists()) {
                     return;
                 }
 
-                File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                File control_file = getVirtualFile("disable.jpg");
                 if (control_file.exists()) {
                     return;
                 }
@@ -754,7 +798,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_ori_height = (int) param.args[1];
                 imageReaderFormat = (int) param.args[2];
                 saveCameraResolution(c2_ori_width, c2_ori_height, currentPackageName, "Camera2-ImageReader");
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                File toast_control = getVirtualFile("no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
                 if (toast_content != null && need_to_show_toast) {
                     try {
@@ -778,6 +822,10 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     private void process_camera2_play() {
+        File file = getVirtualFile("virtual.mp4");
+        if (!file.exists()) {
+            return;
+        }
 
         if (c2_reader_Surfcae != null) {
             if (c2_hw_decode_obj != null) {
@@ -793,7 +841,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     c2_hw_decode_obj.setSaveFrames("null", OutputImageFormat.NV21);
                 }
                 c2_hw_decode_obj.set_surfcae(c2_reader_Surfcae);
-                c2_hw_decode_obj.decode(video_path + "virtual.mp4");
+                c2_hw_decode_obj.decode(file.getAbsolutePath());
             } catch (Throwable throwable) {
                 XposedBridge.log("[ShuzukoCamera] " + throwable);
             }
@@ -813,7 +861,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     c2_hw_decode_obj_1.setSaveFrames("null", OutputImageFormat.NV21);
                 }
                 c2_hw_decode_obj_1.set_surfcae(c2_reader_Surfcae_1);
-                c2_hw_decode_obj_1.decode(video_path + "virtual.mp4");
+                c2_hw_decode_obj_1.decode(file.getAbsolutePath());
             } catch (Throwable throwable) {
                 XposedBridge.log("[ShuzukoCamera] " + throwable);
             }
@@ -828,7 +876,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_player = new MediaPlayer();
             }
             c2_player.setSurface(c2_preview_Surfcae);
-            File sfile = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no-silent.jpg");
+            File sfile = getVirtualFile("no-silent.jpg");
             if (!sfile.exists()) {
                 c2_player.setVolume(0, 0);
             }
@@ -840,7 +888,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         c2_player.start();
                     }
                 });
-                c2_player.setDataSource(video_path + "virtual.mp4");
+                c2_player.setDataSource(file.getAbsolutePath());
                 c2_player.prepare();
             } catch (Exception e) {
                 XposedBridge.log("[ShuzukoCamera][c2player][" + c2_preview_Surfcae.toString() + "]" + e);
@@ -855,7 +903,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_player_1 = new MediaPlayer();
             }
             c2_player_1.setSurface(c2_preview_Surfcae_1);
-            File sfile = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no-silent.jpg");
+            File sfile = getVirtualFile("no-silent.jpg");
             if (!sfile.exists()) {
                 c2_player_1.setVolume(0, 0);
             }
@@ -867,7 +915,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         c2_player_1.start();
                     }
                 });
-                c2_player_1.setDataSource(video_path + "virtual.mp4");
+                c2_player_1.setDataSource(file.getAbsolutePath());
                 c2_player_1.prepare();
             } catch (Exception e) {
                 XposedBridge.log("[ShuzukoCamera][c2player1]" + "[ " + c2_preview_Surfcae_1.toString() + "]" + e);
@@ -933,8 +981,8 @@ public class HookMain implements IXposedHookLoadPackage {
                 is_first_hook_build = true;
                 XposedBridge.log("[ShuzukoCamera] Mở Camera2");
 
-                File file = new File(video_path + "virtual.mp4");
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                File file = getVirtualFile("virtual.mp4");
+                File toast_control = getVirtualFile("no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
                 if (!file.exists()) {
                     if (toast_content != null && need_to_show_toast) {
@@ -1088,7 +1136,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     onemhight = loaclcam.getParameters().getPreviewSize().height;
                     saveCameraResolution(onemwidth, onemhight, currentPackageName, "Camera1-PictureJPEG");
                     XposedBridge.log("[ShuzukoCamera] JPEG callback khởi tạo: " + onemwidth + "x" + onemhight);
-                    File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                    File toast_control = getVirtualFile("no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
@@ -1097,12 +1145,13 @@ public class HookMain implements IXposedHookLoadPackage {
                             XposedBridge.log("[ShuzukoCamera][toast]" + e.toString());
                         }
                     }
-                    File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                    File control_file = getVirtualFile("disable.jpg");
                     if (control_file.exists()) {
                         return;
                     }
 
-                    Bitmap pict = getBMP(video_path + "1000.bmp");
+                    File bmpFile = getVirtualFile("1000.bmp");
+                    Bitmap pict = bmpFile.exists() ? getBMP(bmpFile.getAbsolutePath()) : null;
                     if (pict != null) {
                         Bitmap toUse = pict;
                         if (onemwidth > 0 && onemhight > 0 && (pict.getWidth() != onemwidth || pict.getHeight() != onemhight)) {
@@ -1139,7 +1188,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     onemhight = loaclcam.getParameters().getPreviewSize().height;
                     saveCameraResolution(onemwidth, onemhight, currentPackageName, "Camera1-PictureYUV");
                     XposedBridge.log("[ShuzukoCamera] YUV callback khởi tạo: " + onemwidth + "x" + onemhight);
-                    File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                    File toast_control = getVirtualFile("no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
@@ -1148,11 +1197,12 @@ public class HookMain implements IXposedHookLoadPackage {
                             XposedBridge.log("[ShuzukoCamera][toast]" + ee.toString());
                         }
                     }
-                    File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+                    File control_file = getVirtualFile("disable.jpg");
                     if (control_file.exists()) {
                         return;
                     }
-                    Bitmap pict = getBMP(video_path + "1000.bmp");
+                    File bmpFile = getVirtualFile("1000.bmp");
+                    Bitmap pict = bmpFile.exists() ? getBMP(bmpFile.getAbsolutePath()) : null;
                     if (pict != null) {
                         Bitmap toUse = pict;
                         if (onemwidth > 0 && onemhight > 0 && (pict.getWidth() != onemwidth || pict.getHeight() != onemhight)) {
@@ -1174,17 +1224,17 @@ public class HookMain implements IXposedHookLoadPackage {
     private void process_callback(XC_MethodHook.MethodHookParam param) {
         Class preview_cb_class = param.args[0].getClass();
         int need_stop = 0;
-        File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
+        File control_file = getVirtualFile("disable.jpg");
         if (control_file.exists()) {
             need_stop = 1;
         }
-        File file = new File(video_path + "virtual.mp4");
-        File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+        File file = getVirtualFile("virtual.mp4");
+        File toast_control = getVirtualFile("no_toast.jpg");
         need_to_show_toast = !toast_control.exists();
         if (!file.exists()) {
             if (toast_content != null && need_to_show_toast) {
                 try {
-                    Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh ảo!\nĐường dẫn: " + video_path + "virtual.mp4", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh ảo!\nHãy mở app Shuzuko Camera để chọn ảnh/video.", Toast.LENGTH_SHORT).show();
                 } catch (Exception ee) {
                     XposedBridge.log("[ShuzukoCamera][toast]" + ee);
                 }
@@ -1208,7 +1258,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     saveCameraResolution(mwidth, mhight, currentPackageName, "Camera1-PreviewCallback");
                     int frame_Rate = camera_onPreviewFrame.getParameters().getPreviewFrameRate();
                     XposedBridge.log("[ShuzukoCamera] Khung ngắm xem trước: " + mwidth + "x" + mhight + " @" + frame_Rate + "fps");
-                    File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
+                    File toast_control = getVirtualFile("no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
@@ -1225,7 +1275,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     }
                     hw_decode_obj = new VideoToFrames();
                     hw_decode_obj.setSaveFrames("", OutputImageFormat.NV21);
-                    hw_decode_obj.decode(video_path + "virtual.mp4");
+                    hw_decode_obj.decode(file.getAbsolutePath());
                     while (data_buffer == null) {
                     }
                     System.arraycopy(data_buffer, 0, paramd.args[0], 0, Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));

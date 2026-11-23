@@ -157,15 +157,18 @@ public class MainActivity extends Activity {
                     request_permission();
                 } else {
                     File disable_file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/disable.jpg");
+                    File internalDisable = new File(getFilesDir(), "disable.jpg");
                     if (disable_file.exists() != b){
                         if (b){
                             try {
                                 disable_file.createNewFile();
+                                internalDisable.createNewFile();
                             } catch (IOException e) {
                                 e.printStackTrace();
                             }
-                        }else {
+                        } else {
                             disable_file.delete();
+                            internalDisable.delete();
                         }
                     }
                 }
@@ -179,15 +182,18 @@ public class MainActivity extends Activity {
                     request_permission();
                 } else {
                     File force_show_switch = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/force_show.jpg");
+                    File internalForceShow = new File(getFilesDir(), "force_show.jpg");
                     if (force_show_switch.exists() != b){
                         if (b){
                             try {
                                 force_show_switch.createNewFile();
+                                internalForceShow.createNewFile();
                             } catch (IOException e) {
                                 e.printStackTrace();
                             }
-                        }else {
+                        } else {
                             force_show_switch.delete();
+                            internalForceShow.delete();
                         }
                     }
                 }
@@ -203,15 +209,18 @@ public class MainActivity extends Activity {
                         request_permission();
                     } else {
                         File play_sound_switch = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/no-silent.jpg");
+                        File internalSound = new File(getFilesDir(), "no-silent.jpg");
                         if (play_sound_switch.exists() != b){
                             if (b){
                                 try {
                                     play_sound_switch.createNewFile();
+                                    internalSound.createNewFile();
                                 } catch (IOException e) {
                                     e.printStackTrace();
                                 }
-                            }else {
+                            } else {
                                 play_sound_switch.delete();
+                                internalSound.delete();
                             }
                         }
                     }
@@ -226,15 +235,18 @@ public class MainActivity extends Activity {
                     request_permission();
                 } else {
                     File force_private_dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/private_dir.jpg");
+                    File internalPrivateDir = new File(getFilesDir(), "private_dir.jpg");
                     if (force_private_dir.exists() != b){
                         if (b){
                             try {
                                 force_private_dir.createNewFile();
+                                internalPrivateDir.createNewFile();
                             } catch (IOException e) {
                                 e.printStackTrace();
                             }
-                        }else {
+                        } else {
                             force_private_dir.delete();
+                            internalPrivateDir.delete();
                         }
                     }
                 }
@@ -249,15 +261,18 @@ public class MainActivity extends Activity {
                     request_permission();
                 } else {
                     File disable_toast_file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/no_toast.jpg");
+                    File internalNoToast = new File(getFilesDir(), "no_toast.jpg");
                     if (disable_toast_file.exists() != b){
                         if (b){
                             try {
                                 disable_toast_file.createNewFile();
+                                internalNoToast.createNewFile();
                             } catch (IOException e) {
                                 e.printStackTrace();
                             }
-                        }else {
+                        } else {
                             disable_toast_file.delete();
+                            internalNoToast.delete();
                         }
                     }
                 }
@@ -353,7 +368,7 @@ public class MainActivity extends Activity {
                         
                         runOnUiThread(() -> {
                             progress.dismiss();
-                            Toast.makeText(this, "✓ HOÀN TẤT!\n• Đã lưu ảnh: 1000.bmp\n• Đã tạo video xem trước: virtual.mp4\n\nBây giờ: Hãy mở lại app mục tiêu để sử dụng!", Toast.LENGTH_LONG).show();
+                            Toast.makeText(this, "✓ ĐÃ CẬP NHẬT ẢNH & VIDEO THÀNH CÔNG!\n• Ảnh: 1000.bmp\n• Video: virtual.mp4\n\n⚠️ QUAN TRỌNG: Hãy BUỘC DỪNG (hoặc vuốt tắt) app mục tiêu rồi mở lại để nhận ảnh mới!", Toast.LENGTH_LONG).show();
                             updateFileStatus();
                         });
                     } catch (Exception e) {
@@ -368,6 +383,30 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             Toast.makeText(this, "Lỗi sao chép file: " + e.getMessage(), Toast.LENGTH_LONG).show();
             Log.e("MainActivity", "Error copying file", e);
+        }
+    }
+
+    private void saveInternalCopy(File sourceFile, String targetFileName) {
+        try {
+            File internalFile = new File(getFilesDir(), targetFileName);
+            if (sourceFile.exists()) {
+                try (InputStream in = new FileInputStream(sourceFile);
+                     FileOutputStream out = new FileOutputStream(internalFile)) {
+                    byte[] buffer = new byte[8192];
+                    int len;
+                    while ((len = in.read(buffer)) > 0) {
+                        out.write(buffer, 0, len);
+                    }
+                    out.flush();
+                }
+                Log.d("MainActivity", "Internal copy saved: " + targetFileName + " (" + internalFile.length() + " bytes)");
+            } else {
+                if (internalFile.exists()) {
+                    internalFile.delete();
+                }
+            }
+        } catch (Exception e) {
+            Log.e("MainActivity", "Error saving internal copy: " + targetFileName, e);
         }
     }
 
@@ -393,6 +432,8 @@ public class MainActivity extends Activity {
             }
             outputStream.flush();
         }
+
+        saveInternalCopy(targetFile, targetFileName);
     }
 
     private void updateFileStatus() {
@@ -583,15 +624,17 @@ public class MainActivity extends Activity {
 
     private void deleteAndReset() {
         File publicImage = new File(Environment.getExternalStorageDirectory() + "/DCIM/ShuzukoCamera/1000.bmp");
-        
-        boolean deleted = !publicImage.exists() || publicImage.delete();
-        
-        if (deleted) {
-            Toast.makeText(this, "✓ Public image deleted!\n\nNow:\n1. Select new image\n2. Give Zalo storage permission\n3. Restart Zalo", Toast.LENGTH_LONG).show();
-            updateFileStatus();
-        } else {
-            Toast.makeText(this, "Failed to delete image", Toast.LENGTH_SHORT).show();
-        }
+        File publicVideo = new File(Environment.getExternalStorageDirectory() + "/DCIM/ShuzukoCamera/virtual.mp4");
+        if (publicImage.exists()) publicImage.delete();
+        if (publicVideo.exists()) publicVideo.delete();
+
+        File internalImage = new File(getFilesDir(), "1000.bmp");
+        if (internalImage.exists()) internalImage.delete();
+        File internalVideo = new File(getFilesDir(), "virtual.mp4");
+        if (internalVideo.exists()) internalVideo.delete();
+
+        Toast.makeText(this, "✓ Đã xóa ảnh và video thay thế!\n\nHãy chọn ảnh mới và mở lại app mục tiêu.", Toast.LENGTH_LONG).show();
+        updateFileStatus();
     }
 
     private void createVideoFromImage(File imageFile) throws IOException {
@@ -671,6 +714,7 @@ public class MainActivity extends Activity {
         muxer.release();
         bitmap.recycle();
         
+        saveInternalCopy(outputFile, "virtual.mp4");
         Log.d("MainActivity", "Video created: " + outputFile.getAbsolutePath());
     }
 
@@ -860,6 +904,8 @@ public class MainActivity extends Activity {
             processed.compress(Bitmap.CompressFormat.PNG, 100, outputStream);
             outputStream.flush();
         }
+
+        saveInternalCopy(targetFile, "1000.bmp");
 
         Log.d("MainActivity", "Image saved: " + targetFile.getAbsolutePath());
         Log.d("MainActivity", "Final size: " + processed.getWidth() + "x" + processed.getHeight());
