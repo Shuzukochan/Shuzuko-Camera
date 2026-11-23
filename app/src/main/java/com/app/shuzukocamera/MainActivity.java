@@ -49,9 +49,14 @@ public class MainActivity extends Activity {
     private Switch force_private_dir;
     private Switch disable_toast_switch;
 
+    private int detectedWidth = 0;
+    private int detectedHeight = 0;
+    private String detectedPackage = "";
+
     private Button btnSelectImage;
     private RadioGroup radioGroupRotation;
     private RadioGroup radioGroupScaleMode;
+    private TextView txtDetectedResolution;
     private TextView txtImageStatus;
     private TextView txtVideoStatus;
 
@@ -85,6 +90,7 @@ public class MainActivity extends Activity {
         btnSelectImage = findViewById(R.id.btnSelectImage);
         radioGroupRotation = findViewById(R.id.radioGroupRotation);
         radioGroupScaleMode = findViewById(R.id.radioGroupScaleMode);
+        txtDetectedResolution = findViewById(R.id.txtDetectedResolution);
         txtImageStatus = findViewById(R.id.txtImageStatus);
         txtVideoStatus = findViewById(R.id.txtVideoStatus);
 
@@ -115,8 +121,8 @@ public class MainActivity extends Activity {
             if (!has_permission()) {
                 request_permission();
             } else {
-                // Ask for target resolution first
-                showResolutionDialog();
+                // Show auto-detect or choice dialog
+                showResolutionChoiceDialog();
             }
         });
 
@@ -244,7 +250,7 @@ public class MainActivity extends Activity {
                 builder.setTitle(R.string.permission_lack_warn);
                 builder.setMessage(R.string.permission_description);
 
-                builder.setNegativeButton(R.string.negative, (dialo gInterface, i) -> Toast.makeText(MainActivity.this, R.string.permission_lack_warn, Toast.LENGTH_SHORT).show());
+                builder.setNegativeButton(R.string.negative, (dialogInterface, i) -> Toast.makeText(MainActivity.this, R.string.permission_lack_warn, Toast.LENGTH_SHORT).show());
 
                 builder.setPositiveButton(R.string.positive, (dialogInterface, i) -> requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1));
                 builder.show();
@@ -365,6 +371,19 @@ public class MainActivity extends Activity {
     }
 
     private void updateFileStatus() {
+        loadDetectedResolution();
+        if (txtDetectedResolution != null) {
+            if (detectedWidth > 0 && detectedHeight > 0) {
+                targetWidth = detectedWidth;
+                targetHeight = detectedHeight;
+                txtDetectedResolution.setText("🎯 Auto Resolution: ✓ " + detectedWidth + "x" + detectedHeight + " (" + getAppName(detectedPackage) + ")");
+                txtDetectedResolution.setTextColor(Color.parseColor("#2E7D32"));
+            } else {
+                txtDetectedResolution.setText("🎯 Auto Resolution: Not detected yet\n(Open camera in target app once to auto-detect)");
+                txtDetectedResolution.setTextColor(Color.parseColor("#E65100"));
+            }
+        }
+
         File imageFile = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/1000.bmp");
         File videoFile = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/virtual.mp4");
 
@@ -400,6 +419,12 @@ public class MainActivity extends Activity {
         info.append("📁 Files are stored in:\n");
         info.append(publicPath).append("\n\n");
         info.append("Directory exists: ").append(publicDir.exists() ? "✓ Yes" : "✗ No (will be created)").append("\n\n");
+
+        loadDetectedResolution();
+        if (detectedWidth > 0 && detectedHeight > 0) {
+            info.append("🎯 Detected Camera: ").append(detectedWidth).append("x").append(detectedHeight)
+                .append(" (").append(getAppName(detectedPackage)).append(")\n\n");
+        }
 
         if (publicDir.exists()) {
             File image = new File(publicDir, "1000.bmp");
@@ -458,6 +483,13 @@ public class MainActivity extends Activity {
     private void showDebugInfo() {
         StringBuilder info = new StringBuilder();
         info.append("=== DIAGNOSTIC & SOLUTION ===\n\n");
+        
+        loadDetectedResolution();
+        if (detectedWidth > 0 && detectedHeight > 0) {
+            info.append("🎯 AUTO DETECTED CAMERA:\n");
+            info.append("✓ Size: ").append(detectedWidth).append("x").append(detectedHeight).append("\n");
+            info.append("✓ App: ").append(getAppName(detectedPackage)).append("\n\n");
+        }
         
         // Check PUBLIC path
         File publicImage = new File(Environment.getExternalStorageDirectory() + "/DCIM/ShuzukoCamera/1000.bmp");
@@ -627,7 +659,79 @@ public class MainActivity extends Activity {
         Log.d("MainActivity", "Video created: " + outputFile.getAbsolutePath());
     }
 
-    private void showResolutionDialog() {
+    private void loadDetectedResolution() {
+        File resFile = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/last_res.txt");
+        if (resFile.exists()) {
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(resFile))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("width=")) {
+                        detectedWidth = Integer.parseInt(line.substring(6).trim());
+                    } else if (line.startsWith("height=")) {
+                        detectedHeight = Integer.parseInt(line.substring(7).trim());
+                    } else if (line.startsWith("package=")) {
+                        detectedPackage = line.substring(8).trim();
+                    }
+                }
+            } catch (Exception e) {
+                Log.e("MainActivity", "Error reading last_res.txt", e);
+            }
+        }
+    }
+
+    private String getAppName(String packageName) {
+        if (packageName == null || packageName.isEmpty()) {
+            return "ứng dụng mục tiêu";
+        }
+        try {
+            PackageManager pm = getPackageManager();
+            android.content.pm.ApplicationInfo info = pm.getApplicationInfo(packageName, 0);
+            return pm.getApplicationLabel(info).toString();
+        } catch (Exception e) {
+            return packageName;
+        }
+    }
+
+    private void showResolutionChoiceDialog() {
+        loadDetectedResolution();
+        if (detectedWidth > 0 && detectedHeight > 0) {
+            targetWidth = detectedWidth;
+            targetHeight = detectedHeight;
+            String appName = getAppName(detectedPackage);
+            new AlertDialog.Builder(this)
+                    .setTitle("🎯 Tự Động Nhận Diện Độ Phân Giải")
+                    .setMessage("Đã phát hiện độ phân giải camera từ " + appName + ":\n\n" +
+                            "👉 " + detectedWidth + " x " + detectedHeight + "\n\n" +
+                            "Bạn có muốn áp dụng kích thước này để tự động tối ưu ảnh chụp và video xem trước?")
+                    .setPositiveButton("Dùng " + detectedWidth + "x" + detectedHeight + " (Khuyên dùng)", (dialog, which) -> {
+                        openImagePicker();
+                    })
+                    .setNeutralButton("Nhập thủ công", (dialog, which) -> {
+                        showManualResolutionDialog();
+                    })
+                    .setNegativeButton("Hủy", null)
+                    .show();
+        } else {
+            new AlertDialog.Builder(this)
+                    .setTitle("🎯 Độ Phân Giải Camera")
+                    .setMessage("Chưa phát hiện độ phân giải tự động từ ứng dụng mục tiêu.\n\n" +
+                            "💡 Mẹo: Mở camera trong ứng dụng mục tiêu (ví dụ Zalo) lên 1 lần, Shuzuko Camera sẽ tự động bắt kích thước!\n\n" +
+                            "Bạn có thể nhập độ phân giải thủ công bên dưới:")
+                    .setPositiveButton("Nhập thủ công", (dialog, which) -> {
+                        showManualResolutionDialog();
+                    })
+                    .setNegativeButton("Hủy", null)
+                    .show();
+        }
+    }
+
+    private void openImagePicker() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        startActivityForResult(intent, REQUEST_IMAGE_PICK);
+    }
+
+    private void showManualResolutionDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("🎯 Set Target Resolution");
         
@@ -659,11 +763,7 @@ public class MainActivity extends Activity {
             try {
                 targetWidth = Integer.parseInt(widthInput.getText().toString());
                 targetHeight = Integer.parseInt(heightInput.getText().toString());
-                
-                // Now open image picker
-                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-                intent.setType("image/*");
-                startActivityForResult(intent, REQUEST_IMAGE_PICK);
+                openImagePicker();
             } catch (NumberFormatException e) {
                 Toast.makeText(this, "Invalid resolution!", Toast.LENGTH_SHORT).show();
             }

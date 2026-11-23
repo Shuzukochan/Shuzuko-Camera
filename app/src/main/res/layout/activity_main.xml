@@ -87,6 +87,16 @@
 
         </RadioGroup>
 
+        <TextView
+            android:id="@+id/txtDetectedResolution"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🎯 Auto Resolution: Not detected yet"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="8dp" />
+
         <Button
             android:id="@+id/btnSelectImage"
             android:layout_width="match_parent"

@@ -93,11 +93,58 @@ public class HookMain implements IXposedHookLoadPackage {
 
     public static Class c2_state_callback;
     public Context toast_content;
+    public static String currentPackageName = "";
+
+    public static void saveCameraResolution(int width, int height, String packageName, String source) {
+        if (width <= 0 || height <= 0) return;
+        String content = "width=" + width + "\n" +
+                         "height=" + height + "\n" +
+                         "package=" + (packageName != null ? packageName : "") + "\n" +
+                         "source=" + source + "\n" +
+                         "time=" + System.currentTimeMillis() + "\n";
+        try {
+            File dcimDir = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/");
+            if (!dcimDir.exists()) {
+                dcimDir.mkdirs();
+            }
+            File resFile = new File(dcimDir, "last_res.txt");
+            FileOutputStream fos = new FileOutputStream(resFile, false);
+            fos.write(content.getBytes());
+            fos.flush();
+            fos.close();
+            XposedBridge.log("【VCAM】[AutoRes] Saved resolution " + width + "x" + height + " from " + packageName + " (" + source + ")");
+        } catch (Throwable t) {
+            XposedBridge.log("【VCAM】[AutoRes] Error saving to DCIM: " + t.getMessage());
+        }
+
+        try {
+            if (video_path != null && !video_path.contains("/DCIM/ShuzukoCamera/")) {
+                File vDir = new File(video_path);
+                if (!vDir.exists()) {
+                    vDir.mkdirs();
+                }
+                File vResFile = new File(vDir, "last_res.txt");
+                FileOutputStream fos2 = new FileOutputStream(vResFile, false);
+                fos2.write(content.getBytes());
+                fos2.flush();
+                fos2.close();
+            }
+        } catch (Throwable ignored) {}
+    }
 
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Exception {
+        currentPackageName = lpparam.packageName;
         XposedHelpers.findAndHookMethod("android.hardware.Camera", lpparam.classLoader, "setPreviewTexture", SurfaceTexture.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
+                try {
+                    Camera cam = (Camera) param.thisObject;
+                    if (cam != null && cam.getParameters() != null && cam.getParameters().getPreviewSize() != null) {
+                        int w = cam.getParameters().getPreviewSize().width;
+                        int h = cam.getParameters().getPreviewSize().height;
+                        saveCameraResolution(w, h, currentPackageName, "Camera1-setPreviewTexture");
+                    }
+                } catch (Throwable ignored) {}
                 File file = new File(video_path + "virtual.mp4");
                 if (file.exists()) {
                     File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
@@ -359,6 +406,14 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod("android.hardware.Camera", lpparam.classLoader, "startPreview", new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                try {
+                    Camera cam = (Camera) param.thisObject;
+                    if (cam != null && cam.getParameters() != null && cam.getParameters().getPreviewSize() != null) {
+                        int w = cam.getParameters().getPreviewSize().width;
+                        int h = cam.getParameters().getPreviewSize().height;
+                        saveCameraResolution(w, h, currentPackageName, "Camera1-startPreview");
+                    }
+                } catch (Throwable ignored) {}
                 File file = new File(video_path + "virtual.mp4");
                 File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
@@ -665,6 +720,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_ori_width = (int) param.args[0];
                 c2_ori_height = (int) param.args[1];
                 imageReaderFormat = (int) param.args[2];
+                saveCameraResolution(c2_ori_width, c2_ori_height, currentPackageName, "Camera2-ImageReader");
                 File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
                 if (toast_content != null && need_to_show_toast) {
@@ -1026,6 +1082,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     Camera loaclcam = (Camera) paramd.args[1];
                     onemwidth = loaclcam.getParameters().getPreviewSize().width;
                     onemhight = loaclcam.getParameters().getPreviewSize().height;
+                    saveCameraResolution(onemwidth, onemhight, currentPackageName, "Camera1-PictureJPEG");
                     XposedBridge.log("【VCAM】JPEG拍照回调初始化：宽：" + onemwidth + "高：" + onemhight + "对应的类：" + loaclcam.toString());
                     File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
@@ -1042,10 +1099,19 @@ public class HookMain implements IXposedHookLoadPackage {
                     }
 
                     Bitmap pict = getBMP(video_path + "1000.bmp");
-                    ByteArrayOutputStream temp_array = new ByteArrayOutputStream();
-                    pict.compress(Bitmap.CompressFormat.JPEG, 100, temp_array);
-                    byte[] jpeg_data = temp_array.toByteArray();
-                    paramd.args[0] = jpeg_data;
+                    if (pict != null) {
+                        Bitmap toUse = pict;
+                        if (onemwidth > 0 && onemhight > 0 && (pict.getWidth() != onemwidth || pict.getHeight() != onemhight)) {
+                            toUse = Bitmap.createScaledBitmap(pict, onemwidth, onemhight, true);
+                        }
+                        ByteArrayOutputStream temp_array = new ByteArrayOutputStream();
+                        toUse.compress(Bitmap.CompressFormat.JPEG, 100, temp_array);
+                        byte[] jpeg_data = temp_array.toByteArray();
+                        paramd.args[0] = jpeg_data;
+                        if (toUse != pict) {
+                            toUse.recycle();
+                        }
+                    }
                 } catch (Exception ee) {
                     XposedBridge.log("【VCAM】" + ee.toString());
                 }
@@ -1067,6 +1133,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     Camera loaclcam = (Camera) paramd.args[1];
                     onemwidth = loaclcam.getParameters().getPreviewSize().width;
                     onemhight = loaclcam.getParameters().getPreviewSize().height;
+                    saveCameraResolution(onemwidth, onemhight, currentPackageName, "Camera1-PictureYUV");
                     XposedBridge.log("【VCAM】YUV拍照回调初始化：宽：" + onemwidth + "高：" + onemhight + "对应的类：" + loaclcam.toString());
                     File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
@@ -1081,8 +1148,18 @@ public class HookMain implements IXposedHookLoadPackage {
                     if (control_file.exists()) {
                         return;
                     }
-                    input = getYUVByBitmap(getBMP(video_path + "1000.bmp"));
-                    paramd.args[0] = input;
+                    Bitmap pict = getBMP(video_path + "1000.bmp");
+                    if (pict != null) {
+                        Bitmap toUse = pict;
+                        if (onemwidth > 0 && onemhight > 0 && (pict.getWidth() != onemwidth || pict.getHeight() != onemhight)) {
+                            toUse = Bitmap.createScaledBitmap(pict, onemwidth, onemhight, true);
+                        }
+                        input = getYUVByBitmap(toUse);
+                        paramd.args[0] = input;
+                        if (toUse != pict) {
+                            toUse.recycle();
+                        }
+                    }
                 } catch (Exception ee) {
                     XposedBridge.log("【VCAM】" + ee.toString());
                 }
@@ -1124,6 +1201,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     camera_onPreviewFrame = (android.hardware.Camera) paramd.args[1];
                     mwidth = camera_onPreviewFrame.getParameters().getPreviewSize().width;
                     mhight = camera_onPreviewFrame.getParameters().getPreviewSize().height;
+                    saveCameraResolution(mwidth, mhight, currentPackageName, "Camera1-PreviewCallback");
                     int frame_Rate = camera_onPreviewFrame.getParameters().getPreviewFrameRate();
                     XposedBridge.log("【VCAM】帧预览回调初始化：宽：" + mwidth + " 高：" + mhight + " 帧率：" + frame_Rate);
                     File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
