@@ -682,9 +682,14 @@ public class MainActivity extends Activity {
             throw new IOException("Cannot decode image");
         }
 
+        int encWidth = (targetWidth / 2) * 2;
+        int encHeight = (targetHeight / 2) * 2;
+        if (encWidth <= 0) encWidth = 1920;
+        if (encHeight <= 0) encHeight = 1080;
+
         // Ensure correct size
-        if (bitmap.getWidth() != targetWidth || bitmap.getHeight() != targetHeight) {
-            Bitmap resized = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true);
+        if (bitmap.getWidth() != encWidth || bitmap.getHeight() != encHeight) {
+            Bitmap resized = Bitmap.createScaledBitmap(bitmap, encWidth, encHeight, true);
             bitmap.recycle();
             bitmap = resized;
         }
@@ -697,20 +702,25 @@ public class MainActivity extends Activity {
 
         MediaMuxer muxer = new MediaMuxer(outputFile.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
         
-        MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, targetWidth, targetHeight);
+        MediaCodec codec = null;
+        MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, encWidth, encHeight);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 15000000); // 15 Mbps for crisp HD sharpness
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000); // 5 Mbps: sharp and safe for all hardware encoders
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
-        try {
-            format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh);
-        } catch (Throwable ignored) {}
-        try {
-            format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
-        } catch (Throwable ignored) {}
 
-        MediaCodec codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        try {
+            codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        } catch (Throwable e) {
+            Log.w("MainActivity", "Configure with 5Mbps failed, trying safe 2Mbps", e);
+            if (codec != null) {
+                try { codec.release(); } catch (Throwable ignored) {}
+            }
+            format.setInteger(MediaFormat.KEY_BIT_RATE, 2000000);
+            codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        }
         android.view.Surface surface = codec.createInputSurface();
         codec.start();
 
