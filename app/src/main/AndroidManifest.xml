@@ -23,12 +23,20 @@
 
 
 
+        <receiver
+            android:name=".ResolutionReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.app.shuzukocamera.ACTION_RESOLUTION_DETECTED" />
+            </intent-filter>
+        </receiver>
+
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="安卓虚拟摄像头" />
+            android:value="Shuzuko Camera - Giả lập camera Android" />
         <meta-data
             android:name="xposedminversion"
             android:value="51" />

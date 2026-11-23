@@ -20,7 +20,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 import de.robv.android.xposed.XposedBridge;
 
-//以下代码修改自 https://github.com/zhantong/Android-VideoToImages
 public class VideoToFrames implements Runnable {
     private static final String TAG = "VideoToFrames";
     private static final boolean VERBOSE = false;
@@ -57,7 +56,6 @@ public class VideoToFrames implements Runnable {
         mQueue = queue;
     }
 
-    //设置输出位置，没啥用
     public void setSaveFrames(String dir, OutputImageFormat imageFormat) throws IOException {
         outputImageFormat = imageFormat;
 
@@ -94,7 +92,7 @@ public class VideoToFrames implements Runnable {
 
     @SuppressLint("WrongConstant")
     public void videoDecode(String videoFilePath) throws IOException {
-        XposedBridge.log("【VCAM】【decoder】开始解码");
+        XposedBridge.log("[ShuzukoCamera][decoder] Bắt đầu giải mã video");
         MediaExtractor extractor = null;
         MediaCodec decoder = null;
         try {
@@ -103,7 +101,7 @@ public class VideoToFrames implements Runnable {
             extractor.setDataSource(videoFilePath);
             int trackIndex = selectTrack(extractor);
             if (trackIndex < 0) {
-                XposedBridge.log("【VCAM】【decoder】No video track found in " + videoFilePath);
+                XposedBridge.log("[ShuzukoCamera][decoder] Không tìm thấy video track trong " + videoFilePath);
             }
             extractor.selectTrack(trackIndex);
             MediaFormat mediaFormat = extractor.getTrackFormat(trackIndex);
@@ -207,7 +205,7 @@ public class VideoToFrames implements Runnable {
                             try {
                                 mQueue.put(arr);
                             } catch (InterruptedException e) {
-                                XposedBridge.log("【VCAM】" + e.toString());
+                                XposedBridge.log("[ShuzukoCamera] " + e.toString());
                             }
                         }
                         if (outputImageFormat != null) {
@@ -220,8 +218,7 @@ public class VideoToFrames implements Runnable {
                         try {
                             Thread.sleep(sleepTime);
                         } catch (InterruptedException e) {
-                            XposedBridge.log("【VCAM】" + e.toString());
-                            XposedBridge.log("【VCAM】线程延迟出错");
+                            XposedBridge.log("[ShuzukoCamera] Lỗi delay thread: " + e.toString());
                         }
                     }
                     decoder.releaseOutputBuffer(outputBufferId, true);

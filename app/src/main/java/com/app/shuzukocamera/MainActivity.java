@@ -82,9 +82,34 @@ public class MainActivity extends Activity {
         updateFileStatus();
     }
 
+    private static MainActivity instance;
+
+    public static MainActivity getInstance() {
+        return instance;
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (instance == this) {
+            instance = null;
+        }
+    }
+
+    public void onResolutionUpdated(int width, int height, String packageName) {
+        detectedWidth = width;
+        detectedHeight = height;
+        detectedPackage = packageName;
+        targetWidth = width;
+        targetHeight = height;
+        updateFileStatus();
+        Toast.makeText(this, "🎯 Đã nhận diện camera: " + width + "x" + height + " (" + getAppName(packageName) + ")", Toast.LENGTH_SHORT).show();
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        instance = this;
         setContentView(R.layout.activity_main);
 
         btnSelectImage = findViewById(R.id.btnSelectImage);
@@ -268,7 +293,7 @@ public class MainActivity extends Activity {
 
 
     private void sync_statue_with_files() {
-        Log.d(this.getApplication().getPackageName(), "【VCAM】[sync]同步开关状态");
+        Log.d(this.getApplication().getPackageName(), "[ShuzukoCamera][sync] Đồng bộ trạng thái cấu hình");
 
         if (!has_permission()){
             request_permission();
@@ -313,7 +338,7 @@ public class MainActivity extends Activity {
             if (requestCode == REQUEST_IMAGE_PICK) {
                 // Show progress
                 android.app.ProgressDialog progress = new android.app.ProgressDialog(this);
-                progress.setMessage("Processing image...\n1. Resizing to " + targetWidth + "x" + targetHeight + "\n2. Creating video for preview");
+                progress.setMessage("Đang xử lý ảnh...\n1. Cắt và chỉnh tỉ lệ về " + targetWidth + "x" + targetHeight + "\n2. Tạo video xem trước (virtual.mp4)");
                 progress.setCancelable(false);
                 progress.show();
                 
@@ -328,20 +353,20 @@ public class MainActivity extends Activity {
                         
                         runOnUiThread(() -> {
                             progress.dismiss();
-                            Toast.makeText(this, "✓ DONE!\n• Image saved: 1000.bmp\n• Preview created: virtual.mp4\n\nNow: Restart target app!", Toast.LENGTH_LONG).show();
+                            Toast.makeText(this, "✓ HOÀN TẤT!\n• Đã lưu ảnh: 1000.bmp\n• Đã tạo video xem trước: virtual.mp4\n\nBây giờ: Hãy mở lại app mục tiêu để sử dụng!", Toast.LENGTH_LONG).show();
                             updateFileStatus();
                         });
                     } catch (Exception e) {
                         runOnUiThread(() -> {
                             progress.dismiss();
-                            Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            Toast.makeText(this, "Lỗi xử lý: " + e.getMessage(), Toast.LENGTH_LONG).show();
                             Log.e("MainActivity", "Processing failed", e);
                         });
                     }
                 }).start();
             }
         } catch (Exception e) {
-            Toast.makeText(this, "Error copying file: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Lỗi sao chép file: " + e.getMessage(), Toast.LENGTH_LONG).show();
             Log.e("MainActivity", "Error copying file", e);
         }
     }
@@ -376,10 +401,10 @@ public class MainActivity extends Activity {
             if (detectedWidth > 0 && detectedHeight > 0) {
                 targetWidth = detectedWidth;
                 targetHeight = detectedHeight;
-                txtDetectedResolution.setText("🎯 Auto Resolution: ✓ " + detectedWidth + "x" + detectedHeight + " (" + getAppName(detectedPackage) + ")");
+                txtDetectedResolution.setText("🎯 Độ phân giải tự động: ✓ " + detectedWidth + "x" + detectedHeight + " (" + getAppName(detectedPackage) + ")");
                 txtDetectedResolution.setTextColor(Color.parseColor("#2E7D32"));
             } else {
-                txtDetectedResolution.setText("🎯 Auto Resolution: Not detected yet\n(Open camera in target app once to auto-detect)");
+                txtDetectedResolution.setText("🎯 Độ phân giải tự động: Chưa nhận diện\n(Mở camera trong app mục tiêu 1 lần để tự động bắt)");
                 txtDetectedResolution.setTextColor(Color.parseColor("#E65100"));
             }
         }
@@ -393,78 +418,77 @@ public class MainActivity extends Activity {
                 BitmapFactory.Options options = new BitmapFactory.Options();
                 options.inJustDecodeBounds = true;
                 BitmapFactory.decodeFile(imageFile.getAbsolutePath(), options);
-                txtImageStatus.setText("Capture: ✓ " + options.outWidth + "x" + options.outHeight + " (" + sizeKB + " KB)");
+                txtImageStatus.setText("Ảnh chụp: ✓ " + options.outWidth + "x" + options.outHeight + " (" + sizeKB + " KB)");
             } catch (Exception e) {
-                txtImageStatus.setText("Capture: ✓ (" + sizeKB + " KB)");
+                txtImageStatus.setText("Ảnh chụp: ✓ (" + sizeKB + " KB)");
             }
         } else {
-            txtImageStatus.setText("Capture: Not selected");
+            txtImageStatus.setText("Ảnh chụp: Chưa chọn ảnh");
         }
 
         if (videoFile.exists()) {
             long sizeKB = videoFile.length() / 1024;
-            txtVideoStatus.setText("Preview: ✓ Video created (" + sizeKB + " KB)");
+            txtVideoStatus.setText("Khung xem trước: ✓ Đã tạo video (" + sizeKB + " KB)");
         } else {
-            txtVideoStatus.setText("Preview: Not created");
+            txtVideoStatus.setText("Khung xem trước: Chưa tạo video");
         }
     }
 
     private void checkAllPaths() {
         StringBuilder info = new StringBuilder();
-        info.append("=== FILE LOCATIONS ===\n\n");
+        info.append("=== VỊ TRÍ LƯU FILE ===\n\n");
 
         String publicPath = Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/";
         File publicDir = new File(publicPath);
         
-        info.append("📁 Files are stored in:\n");
+        info.append("📁 Thư mục lưu trữ:\n");
         info.append(publicPath).append("\n\n");
-        info.append("Directory exists: ").append(publicDir.exists() ? "✓ Yes" : "✗ No (will be created)").append("\n\n");
+        info.append("Trạng thái thư mục: ").append(publicDir.exists() ? "✓ Đã tồn tại" : "✗ Chưa có (sẽ tự tạo)").append("\n\n");
 
         loadDetectedResolution();
         if (detectedWidth > 0 && detectedHeight > 0) {
-            info.append("🎯 Detected Camera: ").append(detectedWidth).append("x").append(detectedHeight)
+            info.append("🎯 Độ phân giải đã nhận diện: ").append(detectedWidth).append("x").append(detectedHeight)
                 .append(" (").append(getAppName(detectedPackage)).append(")\n\n");
         }
 
         if (publicDir.exists()) {
             File image = new File(publicDir, "1000.bmp");
             
-            info.append("🖼️ 1000.bmp: ");
+            info.append("🖼️ File ảnh 1000.bmp: ");
             if (image.exists()) {
                 long kb = image.length() / 1024;
                 java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault());
                 String time = sdf.format(new java.util.Date(image.lastModified()));
                 info.append("✓ (").append(kb).append(" KB)\n");
-                info.append("   Last modified: ").append(time).append("\n");
+                info.append("   Cập nhật lúc: ").append(time).append("\n");
                 
                 // Show dimensions
                 try {
                     BitmapFactory.Options options = new BitmapFactory.Options();
                     options.inJustDecodeBounds = true;
                     BitmapFactory.decodeFile(image.getAbsolutePath(), options);
-                    info.append("   Dimensions: ").append(options.outWidth).append("x").append(options.outHeight).append("\n");
+                    info.append("   Kích thước: ").append(options.outWidth).append("x").append(options.outHeight).append("\n");
                 } catch (Exception e) {
-                    info.append("   Error reading dimensions\n");
+                    info.append("   Lỗi đọc kích thước\n");
                 }
             } else {
-                info.append("✗ Not found\n");
+                info.append("✗ Chưa tìm thấy\n");
             }
         }
 
-        info.append("\n💡 How it works:\n");
-        info.append("1. Select image from gallery\n");
-        info.append("2. Set target resolution (e.g., 2400x1080)\n");
-        info.append("3. Image auto-resized and saved\n");
-        info.append("4. Module hooks camera takePicture()\n");
-        info.append("5. Shows your image when capturing!");
+        info.append("\n💡 Cách thức hoạt động:\n");
+        info.append("1. Mở camera app mục tiêu 1 lần để Shuzuko tự nhận diện độ phân giải\n");
+        info.append("2. Chọn ảnh chân dung từ thư viện\n");
+        info.append("3. App tự động crop & render video virtual.mp4\n");
+        info.append("4. Vào lại app mục tiêu để chụp ảnh giả lập!");
 
         new AlertDialog.Builder(this)
-                .setTitle("File Locations")
+                .setTitle("Vị Trí File")
                 .setMessage(info.toString())
-                .setPositiveButton("Open Folder", (dialog, which) -> {
+                .setPositiveButton("Mở Thư Mục", (dialog, which) -> {
                     openFolder();
                 })
-                .setNegativeButton("Close", null)
+                .setNegativeButton("Đóng", null)
                 .show();
     }
 
@@ -476,77 +500,68 @@ public class MainActivity extends Activity {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(intent);
         } catch (Exception e) {
-            Toast.makeText(this, "Cannot open folder. Path: /DCIM/ShuzukoCamera/", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Không thể mở trình duyệt file. Đường dẫn: /DCIM/ShuzukoCamera/", Toast.LENGTH_LONG).show();
         }
     }
 
     private void showDebugInfo() {
         StringBuilder info = new StringBuilder();
-        info.append("=== DIAGNOSTIC & SOLUTION ===\n\n");
+        info.append("=== CHẨN ĐOÁN & HƯỚNG DẪN ===\n\n");
         
         loadDetectedResolution();
         if (detectedWidth > 0 && detectedHeight > 0) {
-            info.append("🎯 AUTO DETECTED CAMERA:\n");
-            info.append("✓ Size: ").append(detectedWidth).append("x").append(detectedHeight).append("\n");
-            info.append("✓ App: ").append(getAppName(detectedPackage)).append("\n\n");
+            info.append("🎯 ĐỘ PHÂN GIẢI CAMERA ĐÃ NHẬN DIỆN:\n");
+            info.append("✓ Kích thước: ").append(detectedWidth).append("x").append(detectedHeight).append("\n");
+            info.append("✓ Ứng dụng: ").append(getAppName(detectedPackage)).append("\n\n");
         }
         
         // Check PUBLIC path
         File publicImage = new File(Environment.getExternalStorageDirectory() + "/DCIM/ShuzukoCamera/1000.bmp");
         
-        info.append("📁 YOUR NEW IMAGE:\n");
-        info.append("Location: /DCIM/ShuzukoCamera/\n");
+        info.append("📁 ẢNH THAY THẾ CỦA BẠN:\n");
+        info.append("Vị trí: /DCIM/ShuzukoCamera/\n");
         if (publicImage.exists()) {
             long kb = publicImage.length() / 1024;
-            info.append("✓ Image exists (").append(kb).append(" KB)\n");
+            info.append("✓ File ảnh tồn tại (").append(kb).append(" KB)\n");
             try {
                 BitmapFactory.Options options = new BitmapFactory.Options();
                 options.inJustDecodeBounds = true;
                 BitmapFactory.decodeFile(publicImage.getAbsolutePath(), options);
-                info.append("✓ Size: ").append(options.outWidth).append("x").append(options.outHeight).append("\n");
+                info.append("✓ Kích thước: ").append(options.outWidth).append("x").append(options.outHeight).append("\n");
                 
                 java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault());
                 String time = sdf.format(new java.util.Date(publicImage.lastModified()));
-                info.append("✓ Modified: ").append(time).append("\n");
+                info.append("✓ Sửa đổi lúc: ").append(time).append("\n");
             } catch (Exception e) {
-                info.append("Error reading\n");
+                info.append("Lỗi đọc file\n");
             }
         } else {
-            info.append("✗ Image NOT found!\n");
-            info.append("Please select image first!\n");
+            info.append("✗ Chưa có file ảnh!\n");
+            info.append("Vui lòng bấm chọn ảnh trước!\n");
         }
         
-        info.append("\n⚠️ PROBLEM:\n");
-        info.append("Zalo may have old image in\nprivate directory that we\ncan't access (Android security)\n");
+        info.append("\n⚠️ LƯU Ý BỘ NHỚ:\n");
+        info.append("Một số app (như Zalo) trên Android 11+ cần được cấp quyền 'Bộ nhớ/Ảnh' trong Cài đặt để có thể đọc ảnh chung.\n");
         
-        info.append("\n✅ SOLUTION:\n");
-        info.append("1. Open Zalo Settings\n");
-        info.append("2. Go to Permissions\n");
-        info.append("3. Enable 'Storage' permission\n");
-        info.append("4. Force stop Zalo\n");
-        info.append("5. Clear recent apps\n");
-        info.append("6. Open Zalo again\n");
-        info.append("7. Module will use PUBLIC path!\n");
+        info.append("\n✅ HƯỚNG DẪN:\n");
+        info.append("1. Cấp quyền Bộ nhớ cho app mục tiêu\n");
+        info.append("2. Buộc dừng (Force stop) app mục tiêu\n");
+        info.append("3. Mở lại app mục tiêu để nhận ảnh\n");
         
-        info.append("\n💡 WHY?\n");
-        info.append("• No storage permission → Private path\n");
-        info.append("• With storage permission → Public path\n");
-        info.append("• Public path = Your new image!\n");
-        
-        info.append("\n🔧 MODULE STATUS:\n");
+        info.append("\n🔧 TRẠNG THÁI MODULE:\n");
         File disable = new File(Environment.getExternalStorageDirectory() + "/DCIM/ShuzukoCamera/disable.jpg");
-        info.append(disable.exists() ? "⚠️ DISABLED (Turn OFF Switch 2!)" : "✓ Active");
+        info.append(disable.exists() ? "⚠️ ĐANG TẮT (Hãy tắt Công tắc 2!)" : "✓ Đang kích hoạt");
         
         new AlertDialog.Builder(this)
-                .setTitle("🔍 Solution Guide")
+                .setTitle("🔍 Hướng Dẫn & Chẩn Đoán")
                 .setMessage(info.toString())
-                .setPositiveButton("Open Zalo Settings", (dialog, which) -> {
+                .setPositiveButton("Cài Đặt Zalo", (dialog, which) -> {
                     openZaloSettings();
                 })
-                .setNeutralButton("Open Folder", (dialog, which) -> {
+                .setNeutralButton("Mở Thư Mục", (dialog, which) -> {
                     openFolder();
                 })
-                .setNegativeButton("Close", null)
+                .setNegativeButton("Đóng", null)
                 .show();
     }
 
@@ -555,9 +570,9 @@ public class MainActivity extends Activity {
             Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
             intent.setData(Uri.parse("package:com.zing.zalo"));
             startActivity(intent);
-            Toast.makeText(this, "Go to Permissions → Enable Storage!\nThen Force Stop Zalo", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Vào Quyền → Bật quyền Bộ nhớ / Ảnh!\nSau đó Buộc dừng Zalo", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
-            Toast.makeText(this, "Cannot open settings. Go manually:\nSettings → Apps → Zalo → Permissions", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Hãy mở thủ công: Cài đặt → Ứng dụng → Zalo → Quyền", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -660,6 +675,19 @@ public class MainActivity extends Activity {
     }
 
     private void loadDetectedResolution() {
+        // 1. Read from SharedPreferences first (received from broadcast, immune to Scoped Storage)
+        android.content.SharedPreferences prefs = getSharedPreferences("ShuzukoPrefs", MODE_PRIVATE);
+        int pWidth = prefs.getInt("detected_width", 0);
+        int pHeight = prefs.getInt("detected_height", 0);
+        String pPkg = prefs.getString("detected_package", "");
+        if (pWidth > 0 && pHeight > 0) {
+            detectedWidth = pWidth;
+            detectedHeight = pHeight;
+            detectedPackage = pPkg;
+            return;
+        }
+
+        // 2. Read from DCIM file as fallback
         File resFile = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/last_res.txt");
         if (resFile.exists()) {
             try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(resFile))) {
@@ -733,7 +761,7 @@ public class MainActivity extends Activity {
 
     private void showManualResolutionDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("🎯 Set Target Resolution");
+        builder.setTitle("🎯 Cài Đặt Độ Phân Giải Thủ Công");
         
         // Create custom view with EditTexts
         android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
@@ -741,35 +769,35 @@ public class MainActivity extends Activity {
         layout.setPadding(50, 40, 50, 10);
         
         TextView info = new TextView(this);
-        info.setText("Enter the resolution from toast message\n(e.g., Zalo shows: 2400x1080)\n");
+        info.setText("Nhập độ phân giải camera mong muốn\n(Ví dụ: 1080x1920 hoặc 1080x2400):\n");
         info.setTextSize(14);
         layout.addView(info);
         
         EditText widthInput = new EditText(this);
-        widthInput.setHint("Width (e.g., 2400)");
+        widthInput.setHint("Chiều rộng (Width, VD: 1080)");
         widthInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         widthInput.setText(String.valueOf(targetWidth));
         layout.addView(widthInput);
         
         EditText heightInput = new EditText(this);
-        heightInput.setHint("Height (e.g., 1080)");
+        heightInput.setHint("Chiều cao (Height, VD: 2400)");
         heightInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         heightInput.setText(String.valueOf(targetHeight));
         layout.addView(heightInput);
         
         builder.setView(layout);
         
-        builder.setPositiveButton("Select Image", (dialog, which) -> {
+        builder.setPositiveButton("Chọn ảnh", (dialog, which) -> {
             try {
                 targetWidth = Integer.parseInt(widthInput.getText().toString());
                 targetHeight = Integer.parseInt(heightInput.getText().toString());
                 openImagePicker();
             } catch (NumberFormatException e) {
-                Toast.makeText(this, "Invalid resolution!", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Độ phân giải không hợp lệ!", Toast.LENGTH_SHORT).show();
             }
         });
         
-        builder.setNegativeButton("Cancel", null);
+        builder.setNegativeButton("Hủy", null);
         builder.show();
     }
 

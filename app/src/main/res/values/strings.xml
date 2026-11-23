@@ -1,21 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Shuzuko Camera</string>
-    <string name="select_image">Select Replacement Image</string>
-    <string name="info_text">This will replace both preview and captured photo</string>
-    <string name="rotation_label">Image Rotation:</string>
-    <string name="scale_mode_label">Scale Mode:</string>
-    <string name="check_paths">Show File Locations</string>
-    <string name="verify_files">Verify Files &amp; Hook Status</string>
-    <string name="image_status">Image: Not selected</string>
-    <string name="video_status">Preview: Not created</string>
-    <string name="switch1">Force to show permission lack warning</string>
-    <string name="switch2">Disable the module temporarily (On is disable)</string>
-    <string name="switch3">Play sounds of videos</string>
-    <string name="switch4">Force every app use private directory</string>
-    <string name="switch5">Disable toast message</string>
-    <string name="permission_lack_warn">Missing permissions</string>
-    <string name="permission_description">The permission to access local storage is used to set up configuration files. If refused you need to set up file manually.</string>
-    <string name="positive">Sure</string>
-    <string name="negative">Refuse</string>
+    <string name="replacement_image_title">📸 Ảnh Thay Thế Camera</string>
+    <string name="select_image">Chọn Ảnh Thay Thế Từ Thư Viện</string>
+    <string name="info_text">Ảnh này sẽ tự động thay thế cả khung xem trước (Preview) lẫn ảnh chụp thật</string>
+    <string name="rotation_label">Xoay ảnh:</string>
+    <string name="scale_mode_label">Chế độ khớp khung hình:</string>
+    <string name="rotate_0">0° (Không xoay)</string>
+    <string name="rotate_270">270° (Xoay 270° ←)</string>
+    <string name="scale_center_crop">Center Crop (Khuyên dùng - Cắt giữa, không méo mặt)</string>
+    <string name="scale_stretch">Kéo dãn (Stretch - Có thể làm méo hình)</string>
+    <string name="check_paths">Xem Vị Trí Lưu File</string>
+    <string name="verify_files">Kiểm Tra Trạng Thái &amp; File</string>
+    <string name="image_status">Ảnh chụp: Chưa chọn</string>
+    <string name="video_status">Khung xem trước: Chưa tạo</string>
+    <string name="settings_title">⚙️ Cài Đặt</string>
+    <string name="switch1">Luôn hiện cảnh báo thiếu quyền</string>
+    <string name="switch2">Tạm thời tắt module (Gạt BẬT là TẮT module)</string>
+    <string name="switch3">Phát âm thanh từ video giả lập</string>
+    <string name="switch4">Bắt buộc tất cả app dùng thư mục riêng (Private)</string>
+    <string name="switch5">Tắt thông báo Toast trên màn hình</string>
+    <string name="permission_lack_warn">Thiếu quyền truy cập bộ nhớ</string>
+    <string name="permission_description">Module cần quyền truy cập bộ nhớ để lưu ảnh và video thay thế vào /DCIM/ShuzukoCamera/. Vui lòng cấp quyền để hoạt động chính xác.</string>
+    <string name="positive">Đồng ý</string>
+    <string name="negative">Từ chối</string>
 </resources>

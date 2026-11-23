@@ -13,7 +13,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="📸 Replacement Image"
+            android:text="@string/replacement_image_title"
             android:textSize="18sp"
             android:textStyle="bold"
             android:layout_marginBottom="4dp" />
@@ -45,7 +45,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="0° (No rotation)"
+                android:text="@string/rotate_0"
                 android:checked="true" />
 
             <RadioButton
@@ -53,7 +53,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="270° (←)" />
+                android:text="@string/rotate_270" />
 
         </RadioGroup>
 
@@ -76,14 +76,14 @@
                 android:id="@+id/radioScaleCenterCrop"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Center Crop (recommended - no distortion)"
+                android:text="@string/scale_center_crop"
                 android:checked="true" />
 
             <RadioButton
                 android:id="@+id/radioScaleStretch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Stretch to fit (may distort)" />
+                android:text="@string/scale_stretch" />
 
         </RadioGroup>
 
@@ -91,7 +91,7 @@
             android:id="@+id/txtDetectedResolution"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="🎯 Auto Resolution: Not detected yet"
+            android:text="🎯 Độ phân giải tự động: Đang chờ nhận diện..."
             android:textSize="13sp"
             android:textStyle="bold"
             android:layout_marginTop="4dp"
@@ -128,7 +128,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="⚙️ Settings"
+            android:text="@string/settings_title"
             android:textSize="18sp"
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />

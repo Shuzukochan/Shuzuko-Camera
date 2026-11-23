@@ -92,11 +92,30 @@ public class HookMain implements IXposedHookLoadPackage {
     public int c2_ori_height = 720;
 
     public static Class c2_state_callback;
-    public Context toast_content;
+    public static Context toast_content;
     public static String currentPackageName = "";
 
     public static void saveCameraResolution(int width, int height, String packageName, String source) {
         if (width <= 0 || height <= 0) return;
+
+        // 1. Send explicit broadcast to Shuzuko Camera (immune to Scoped Storage restrictions)
+        try {
+            if (toast_content != null) {
+                android.content.Intent intent = new android.content.Intent("com.app.shuzukocamera.ACTION_RESOLUTION_DETECTED");
+                intent.setPackage("com.app.shuzukocamera");
+                intent.putExtra("width", width);
+                intent.putExtra("height", height);
+                intent.putExtra("package", packageName != null ? packageName : "");
+                intent.putExtra("source", source);
+                intent.addFlags(android.content.Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+                toast_content.sendBroadcast(intent);
+                XposedBridge.log("[ShuzukoCamera] Broadcasted resolution: " + width + "x" + height + " for " + packageName);
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[ShuzukoCamera] Broadcast error: " + t.getMessage());
+        }
+
+        // 2. Write to DCIM directory if target app has permissions
         String content = "width=" + width + "\n" +
                          "height=" + height + "\n" +
                          "package=" + (packageName != null ? packageName : "") + "\n" +
@@ -112,11 +131,10 @@ public class HookMain implements IXposedHookLoadPackage {
             fos.write(content.getBytes());
             fos.flush();
             fos.close();
-            XposedBridge.log("【VCAM】[AutoRes] Saved resolution " + width + "x" + height + " from " + packageName + " (" + source + ")");
-        } catch (Throwable t) {
-            XposedBridge.log("【VCAM】[AutoRes] Error saving to DCIM: " + t.getMessage());
-        }
+            XposedBridge.log("[ShuzukoCamera] Saved resolution " + width + "x" + height + " to DCIM");
+        } catch (Throwable ignored) {}
 
+        // 3. Write to private directory
         try {
             if (video_path != null && !video_path.contains("/DCIM/ShuzukoCamera/")) {
                 File vDir = new File(video_path);
@@ -163,10 +181,10 @@ public class HookMain implements IXposedHookLoadPackage {
                     }
                     if (origin_preview_camera != null && origin_preview_camera.equals(param.thisObject)) {
                         param.args[0] = fake_SurfaceTexture;
-                        XposedBridge.log("【VCAM】发现重复" + origin_preview_camera.toString());
+                        XposedBridge.log("[ShuzukoCamera] Phát hiện camera trùng lặp " + origin_preview_camera.toString());
                         return;
                     } else {
-                        XposedBridge.log("【VCAM】创建预览");
+                        XposedBridge.log("[ShuzukoCamera] Tạo khung xem trước Camera1");
                     }
 
                     origin_preview_camera = (Camera) param.thisObject;
@@ -183,9 +201,9 @@ public class HookMain implements IXposedHookLoadPackage {
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "不存在替换视频\n" + lpparam.packageName + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh thay thế!\nHãy mở app Shuzuko Camera để chọn ảnh.", Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
+                            XposedBridge.log("[ShuzukoCamera] [toast] " + ee.toString());
                         }
                     }
                 }
@@ -207,20 +225,46 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (control_file.exists()) {
                     return;
                 }
+
+                // Detect resolution directly from CameraCharacteristics
+                try {
+                    android.hardware.camera2.CameraManager cm = (android.hardware.camera2.CameraManager) param.thisObject;
+                    String camId = (String) param.args[0];
+                    android.hardware.camera2.CameraCharacteristics chars = cm.getCameraCharacteristics(camId);
+                    android.hardware.camera2.params.StreamConfigurationMap map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                    if (map != null) {
+                        android.util.Size[] sizes = map.getOutputSizes(SurfaceTexture.class);
+                        if (sizes != null && sizes.length > 0) {
+                            android.util.Size chosen = sizes[0];
+                            for (android.util.Size s : sizes) {
+                                if ((s.getWidth() == 1920 && s.getHeight() == 1080) || 
+                                    (s.getWidth() == 1080 && s.getHeight() == 1920) || 
+                                    (s.getWidth() == 2400 && s.getHeight() == 1080) || 
+                                    (s.getWidth() == 1080 && s.getHeight() == 2400)) {
+                                    chosen = s;
+                                    break;
+                                }
+                            }
+                            saveCameraResolution(chosen.getWidth(), chosen.getHeight(), currentPackageName, "Camera2-Characteristics");
+                        }
+                    }
+                } catch (Throwable t) {
+                    XposedBridge.log("[ShuzukoCamera] Characteristics error: " + t.getMessage());
+                }
+
                 File file = new File(video_path + "virtual.mp4");
                 File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
                 if (!file.exists()) {
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "不存在替换视频\n" + lpparam.packageName + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh thay thế!\nHãy mở app Shuzuko Camera để chọn ảnh.", Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
+                            XposedBridge.log("[ShuzukoCamera] [toast] " + ee.toString());
                         }
                     }
-                    return;
                 }
-                XposedBridge.log("【VCAM】1位参数初始化相机，类：" + c2_state_callback.toString());
+                XposedBridge.log("[ShuzukoCamera] Khởi tạo Camera2 (1 param) cho: " + c2_state_callback.toString());
                 is_first_hook_build = true;
                 process_camera2_init(c2_state_callback);
             }
@@ -242,21 +286,47 @@ public class HookMain implements IXposedHookLoadPackage {
                     if (control_file.exists()) {
                         return;
                     }
+
+                    // Detect resolution directly from CameraCharacteristics
+                    try {
+                        android.hardware.camera2.CameraManager cm = (android.hardware.camera2.CameraManager) param.thisObject;
+                        String camId = (String) param.args[0];
+                        android.hardware.camera2.CameraCharacteristics chars = cm.getCameraCharacteristics(camId);
+                        android.hardware.camera2.params.StreamConfigurationMap map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                        if (map != null) {
+                            android.util.Size[] sizes = map.getOutputSizes(SurfaceTexture.class);
+                            if (sizes != null && sizes.length > 0) {
+                                android.util.Size chosen = sizes[0];
+                                for (android.util.Size s : sizes) {
+                                    if ((s.getWidth() == 1920 && s.getHeight() == 1080) || 
+                                        (s.getWidth() == 1080 && s.getHeight() == 1920) || 
+                                        (s.getWidth() == 2400 && s.getHeight() == 1080) || 
+                                        (s.getWidth() == 1080 && s.getHeight() == 2400)) {
+                                        chosen = s;
+                                        break;
+                                    }
+                                }
+                                saveCameraResolution(chosen.getWidth(), chosen.getHeight(), currentPackageName, "Camera2-Characteristics");
+                            }
+                        }
+                    } catch (Throwable t) {
+                        XposedBridge.log("[ShuzukoCamera] Characteristics error: " + t.getMessage());
+                    }
+
                     File file = new File(video_path + "virtual.mp4");
                     File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (!file.exists()) {
                         if (toast_content != null && need_to_show_toast) {
                             try {
-                                Toast.makeText(toast_content, "不存在替换视频\n" + lpparam.packageName + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
+                                Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh thay thế!\nHãy mở app Shuzuko Camera để chọn ảnh.", Toast.LENGTH_SHORT).show();
                             } catch (Exception ee) {
-                                XposedBridge.log("【VCAM】[toast]" + ee.toString());
+                                XposedBridge.log("[ShuzukoCamera] [toast] " + ee.toString());
                             }
                         }
-                        return;
                     }
                     c2_state_callback = param.args[2].getClass();
-                    XposedBridge.log("【VCAM】2位参数初始化相机，类：" + c2_state_callback.toString());
+                    XposedBridge.log("[ShuzukoCamera] Khởi tạo Camera2 (2 param) cho: " + c2_state_callback.toString());
                     is_first_hook_build = true;
                     process_camera2_init(c2_state_callback);
                 }
@@ -303,7 +373,7 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod("android.hardware.Camera", lpparam.classLoader, "takePicture", Camera.ShutterCallback.class, Camera.PictureCallback.class, Camera.PictureCallback.class, Camera.PictureCallback.class, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
-                XposedBridge.log("【VCAM】4参数拍照");
+                XposedBridge.log("[ShuzukoCamera] Chụp ảnh (Camera1)");
                 if (param.args[1] != null) {
                     process_a_shot_YUV(param);
                 }
@@ -320,12 +390,12 @@ public class HookMain implements IXposedHookLoadPackage {
                 super.beforeHookedMethod(param);
                 File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                 need_to_show_toast = !toast_control.exists();
-                XposedBridge.log("【VCAM】[record]" + lpparam.packageName);
+                XposedBridge.log("[ShuzukoCamera] [record] " + lpparam.packageName);
                 if (toast_content != null && need_to_show_toast) {
                     try {
-                        Toast.makeText(toast_content, "应用：" + lpparam.appInfo.name + "(" + lpparam.packageName + ")" + "触发了录像，但目前无法拦截", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(toast_content, "[Shuzuko Camera] Ứng dụng " + lpparam.packageName + " đang quay video (tính năng quay video chưa hỗ trợ).", Toast.LENGTH_SHORT).show();
                     }catch (Exception ee){
-                        XposedBridge.log("【VCAM】[toast]" + Arrays.toString(ee.getStackTrace()));
+                        XposedBridge.log("[ShuzukoCamera] [toast] " + ee.toString());
                     }
                 }
             }
@@ -339,30 +409,29 @@ public class HookMain implements IXposedHookLoadPackage {
                     try {
                         toast_content = ((Application) param.args[0]).getApplicationContext();
                     } catch (Exception ee) {
-                        XposedBridge.log("【VCAM】" + ee.toString());
+                        XposedBridge.log("[ShuzukoCamera] " + ee.toString());
                     }
                     File force_private = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/ShuzukoCamera/private_dir.jpg");
-                    if (toast_content != null) {//后半段用于强制私有目录
+                    if (toast_content != null) {
                         int auth_statue = 0;
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             try {
                                 auth_statue += (toast_content.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) + 1);
                             } catch (Exception ee) {
-                                XposedBridge.log("【VCAM】[permission-check]" + ee.toString());
+                                XposedBridge.log("[ShuzukoCamera] [permission-check] " + ee.toString());
                             }
                             try {
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                                     auth_statue += (toast_content.checkSelfPermission(Manifest.permission.MANAGE_EXTERNAL_STORAGE) + 1);
                                 }
                             } catch (Exception ee) {
-                                XposedBridge.log("【VCAM】[permission-check]" + ee.toString());
+                                XposedBridge.log("[ShuzukoCamera] [permission-check] " + ee.toString());
                             }
                         }else {
                             if (toast_content.checkCallingPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED ){
                                 auth_statue = 2;
                             }
                         }
-                        //权限判断完毕
                         if (auth_statue < 1 || force_private.exists()) {
                             File shown_file = new File(toast_content.getExternalFilesDir(null).getAbsolutePath() + "/ShuzukoCamera/");
                             if ((!shown_file.isDirectory()) && shown_file.exists()) {
@@ -375,7 +444,7 @@ public class HookMain implements IXposedHookLoadPackage {
                             File toast_force_file = new File(Environment.getExternalStorageDirectory().getPath()+ "/DCIM/ShuzukoCamera/force_show.jpg");
                             if ((!lpparam.packageName.equals(BuildConfig.APPLICATION_ID)) && ((!shown_file.exists()) || toast_force_file.exists())) {
                                 try {
-                                    Toast.makeText(toast_content, lpparam.packageName+"未授予读取本地目录权限，请检查权限\nShuzukoCamera目前重定向为 " + toast_content.getExternalFilesDir(null).getAbsolutePath() + "/ShuzukoCamera/", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(toast_content, "[Shuzuko Camera] Ứng dụng " + lpparam.packageName + " chưa có quyền bộ nhớ.\nĐã chuyển hướng lưu trữ sang thư mục riêng của app.", Toast.LENGTH_SHORT).show();
                                     FileOutputStream fos = new FileOutputStream(toast_content.getExternalFilesDir(null).getAbsolutePath() + "/ShuzukoCamera/" + "has_shown");
                                     String info = "shown";
                                     fos.write(info.getBytes());
@@ -420,9 +489,9 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (!file.exists()) {
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "不存在替换视频\n" + lpparam.packageName + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh ảo!\nĐường dẫn: " + video_path + "virtual.mp4", Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
+                            XposedBridge.log("[ShuzukoCamera][toast]" + ee.toString());
                         }
                     }
                     return;
@@ -432,7 +501,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     return;
                 }
                 is_someone_playing = false;
-                XposedBridge.log("【VCAM】开始预览");
+                XposedBridge.log("[ShuzukoCamera] Bắt đầu xem trước");
                 start_preview_camera = (Camera) param.thisObject;
                 if (ori_holder != null) {
 
@@ -467,7 +536,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         mplayer1.setDataSource(video_path + "virtual.mp4");
                         mplayer1.prepare();
                     } catch (IOException e) {
-                        XposedBridge.log("【VCAM】" + e.toString());
+                        XposedBridge.log("[ShuzukoCamera] " + e.toString());
                     }
                 }
 
@@ -509,7 +578,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         mMediaPlayer.setDataSource(video_path + "virtual.mp4");
                         mMediaPlayer.prepare();
                     } catch (IOException e) {
-                        XposedBridge.log("【VCAM】" + e.toString());
+                        XposedBridge.log("[ShuzukoCamera] " + e.toString());
                     }
                 }
             }
@@ -518,18 +587,9 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod("android.hardware.Camera", lpparam.classLoader, "setPreviewDisplay", SurfaceHolder.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                XposedBridge.log("【VCAM】添加Surfaceview预览");
+                XposedBridge.log("[ShuzukoCamera] Thêm SurfaceView xem trước");
                 File file = new File(video_path + "virtual.mp4");
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
-                need_to_show_toast = !toast_control.exists();
                 if (!file.exists()) {
-                    if (toast_content != null && need_to_show_toast) {
-                        try {
-                            Toast.makeText(toast_content, "不存在替换视频\n" + lpparam.packageName + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
-                        } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
-                        }
-                    }
                     return;
                 }
                 File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
@@ -570,16 +630,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     return;
                 }
                 File file = new File(video_path + "virtual.mp4");
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
-                need_to_show_toast = !toast_control.exists();
                 if (!file.exists()) {
-                    if (toast_content != null && need_to_show_toast) {
-                        try {
-                            Toast.makeText(toast_content, "不存在替换视频\n" + lpparam.packageName + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
-                        } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
-                        }
-                    }
                     return;
                 }
                 if (param.args[0].equals(c2_virtual_surface)) {
@@ -607,7 +658,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         }
                     }
                 }
-                XposedBridge.log("【VCAM】添加目标：" + param.args[0].toString());
+                XposedBridge.log("[ShuzukoCamera] Thêm mục tiêu: " + param.args[0].toString());
                 param.args[0] = c2_virtual_surface;
 
             }
@@ -624,16 +675,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     return;
                 }
                 File file = new File(video_path + "virtual.mp4");
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
-                need_to_show_toast = !toast_control.exists();
                 if (!file.exists()) {
-                    if (toast_content != null && need_to_show_toast) {
-                        try {
-                            Toast.makeText(toast_content, "不存在替换视频\n" + lpparam.packageName + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
-                        } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
-                        }
-                    }
                     return;
                 }
                 File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
@@ -654,7 +696,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     c2_reader_Surfcae = null;
                 }
 
-                XposedBridge.log("【VCAM】移除目标：" + param.args[0].toString());
+                XposedBridge.log("[ShuzukoCamera] Xóa mục tiêu: " + param.args[0].toString());
             }
         });
 
@@ -669,16 +711,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 }
                 c2_builder = (CaptureRequest.Builder) param.thisObject;
                 File file = new File(video_path + "virtual.mp4");
-                File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
-                need_to_show_toast = !toast_control.exists();
-                if (!file.exists() && need_to_show_toast) {
-                    if (toast_content != null) {
-                        try {
-                            Toast.makeText(toast_content, "不存在替换视频\n" + lpparam.packageName + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
-                        } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
-                        }
-                    }
+                if (!file.exists()) {
                     return;
                 }
 
@@ -686,7 +719,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (control_file.exists()) {
                     return;
                 }
-                XposedBridge.log("【VCAM】开始build请求");
+                XposedBridge.log("[ShuzukoCamera] Bắt đầu build request");
                 process_camera2_play();
             }
         });
@@ -708,7 +741,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     }
                     is_someone_playing = false;
 
-                    XposedBridge.log("停止预览");
+                    XposedBridge.log("[ShuzukoCamera] Dừng xem trước");
                 }
             }
         });*/
@@ -716,7 +749,7 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod("android.media.ImageReader", lpparam.classLoader, "newInstance", int.class, int.class, int.class, int.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
-                XposedBridge.log("【VCAM】应用创建了渲染器：宽：" + param.args[0] + " 高：" + param.args[1] + "格式" + param.args[2]);
+                XposedBridge.log("[ShuzukoCamera] Khởi tạo ImageReader: " + param.args[0] + "x" + param.args[1] + ", định dạng: " + param.args[2]);
                 c2_ori_width = (int) param.args[0];
                 c2_ori_height = (int) param.args[1];
                 imageReaderFormat = (int) param.args[2];
@@ -725,9 +758,9 @@ public class HookMain implements IXposedHookLoadPackage {
                 need_to_show_toast = !toast_control.exists();
                 if (toast_content != null && need_to_show_toast) {
                     try {
-                        Toast.makeText(toast_content, "应用创建了渲染器：\n宽：" + param.args[0] + "\n高：" + param.args[1] + "\n一般只需要宽高比与视频相同", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(toast_content, "[Shuzuko Camera] Đã nhận diện Camera2 ImageReader:\n" + param.args[0] + " x " + param.args[1], Toast.LENGTH_SHORT).show();
                     } catch (Exception e) {
-                        XposedBridge.log("【VCAM】[toast]" + e.toString());
+                        XposedBridge.log("[ShuzukoCamera][toast]" + e.toString());
                     }
                 }
             }
@@ -738,7 +771,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
-                        XposedBridge.log("【VCAM】onCaptureFailed" + "原因：" + ((CaptureFailure) param.args[2]).getReason());
+                        XposedBridge.log("[ShuzukoCamera] onCaptureFailed nguyên nhân: " + ((CaptureFailure) param.args[2]).getReason());
 
                     }
                 });
@@ -762,7 +795,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_hw_decode_obj.set_surfcae(c2_reader_Surfcae);
                 c2_hw_decode_obj.decode(video_path + "virtual.mp4");
             } catch (Throwable throwable) {
-                XposedBridge.log("【VCAM】" + throwable);
+                XposedBridge.log("[ShuzukoCamera] " + throwable);
             }
         }
 
@@ -782,7 +815,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_hw_decode_obj_1.set_surfcae(c2_reader_Surfcae_1);
                 c2_hw_decode_obj_1.decode(video_path + "virtual.mp4");
             } catch (Throwable throwable) {
-                XposedBridge.log("【VCAM】" + throwable);
+                XposedBridge.log("[ShuzukoCamera] " + throwable);
             }
         }
 
@@ -810,7 +843,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_player.setDataSource(video_path + "virtual.mp4");
                 c2_player.prepare();
             } catch (Exception e) {
-                XposedBridge.log("【VCAM】[c2player][" + c2_preview_Surfcae.toString() + "]" + e);
+                XposedBridge.log("[ShuzukoCamera][c2player][" + c2_preview_Surfcae.toString() + "]" + e);
             }
         }
 
@@ -837,10 +870,10 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_player_1.setDataSource(video_path + "virtual.mp4");
                 c2_player_1.prepare();
             } catch (Exception e) {
-                XposedBridge.log("【VCAM】[c2player1]" + "[ " + c2_preview_Surfcae_1.toString() + "]" + e);
+                XposedBridge.log("[ShuzukoCamera][c2player1]" + "[ " + c2_preview_Surfcae_1.toString() + "]" + e);
             }
         }
-        XposedBridge.log("【VCAM】Camera2处理过程完全执行");
+        XposedBridge.log("[ShuzukoCamera] Camera2 xử lý hoàn tất");
     }
 
     private Surface create_virtual_surface() {
@@ -862,7 +895,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_virtual_surface = create_virtual_surface();
             }
         }
-        XposedBridge.log("【VCAM】【重建垃圾场】" + c2_virtual_surface.toString());
+        XposedBridge.log("[ShuzukoCamera] Khởi tạo virtual surface: " + c2_virtual_surface.toString());
         return c2_virtual_surface;
     }
 
@@ -898,7 +931,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_reader_Surfcae = null;
                 c2_preview_Surfcae = null;
                 is_first_hook_build = true;
-                XposedBridge.log("【VCAM】打开相机C2");
+                XposedBridge.log("[ShuzukoCamera] Mở Camera2");
 
                 File file = new File(video_path + "virtual.mp4");
                 File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
@@ -906,9 +939,9 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (!file.exists()) {
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "不存在替换视频\n" + toast_content.getPackageName() + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(toast_content, "[Shuzuko Camera] Chưa thiết lập video/ảnh ảo.\nĐang sử dụng camera gốc.", Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
+                            XposedBridge.log("[ShuzukoCamera][toast]" + ee.toString());
                         }
                     }
                     return;
@@ -917,7 +950,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
                         if (paramd.args[0] != null) {
-                            XposedBridge.log("【VCAM】createCaptureSession创捷捕获，原始:" + paramd.args[0].toString() + "虚拟：" + c2_virtual_surface.toString());
+                            XposedBridge.log("[ShuzukoCamera] createCaptureSession gốc: " + paramd.args[0].toString() + " -> virtual: " + c2_virtual_surface.toString());
                             paramd.args[0] = Arrays.asList(c2_virtual_surface);
                             if (paramd.args[1] != null) {
                                 process_camera2Session_callback((CameraCaptureSession.StateCallback) paramd.args[1]);
@@ -925,35 +958,6 @@ public class HookMain implements IXposedHookLoadPackage {
                         }
                     }
                 });
-
-/*                XposedHelpers.findAndHookMethod(param.args[0].getClass(), "close", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
-                        XposedBridge.log("C2终止预览");
-                        if (c2_hw_decode_obj != null) {
-                            c2_hw_decode_obj.stopDecode();
-                            c2_hw_decode_obj = null;
-                        }
-                        if (c2_hw_decode_obj_1 != null) {
-                            c2_hw_decode_obj_1.stopDecode();
-                            c2_hw_decode_obj_1 = null;
-                        }
-                        if (c2_player != null) {
-                            c2_player.release();
-                            c2_player = null;
-                        }
-                        if (c2_player_1 != null){
-                            c2_player_1.release();
-                            c2_player_1 = null;
-                        }
-                        c2_preview_Surfcae_1 = null;
-                        c2_reader_Surfcae_1 = null;
-                        c2_reader_Surfcae = null;
-                        c2_preview_Surfcae = null;
-                        need_recreate = true;
-                        is_first_hook_build= true;
-                    }
-                });*/
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createCaptureSessionByOutputConfigurations", List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
@@ -964,7 +968,7 @@ public class HookMain implements IXposedHookLoadPackage {
                                 outputConfiguration = new OutputConfiguration(c2_virtual_surface);
                                 param.args[0] = Arrays.asList(outputConfiguration);
 
-                                XposedBridge.log("【VCAM】执行了createCaptureSessionByOutputConfigurations-144777");
+                                XposedBridge.log("[ShuzukoCamera] Hook createCaptureSessionByOutputConfigurations");
                                 if (param.args[1] != null) {
                                     process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[1]);
                                 }
@@ -974,19 +978,19 @@ public class HookMain implements IXposedHookLoadPackage {
                 }
 
 
-                    XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createConstrainedHighSpeedCaptureSession", List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            super.beforeHookedMethod(param);
-                            if (param.args[0] != null) {
-                                param.args[0] = Arrays.asList(c2_virtual_surface);
-                                XposedBridge.log("【VCAM】执行了 createConstrainedHighSpeedCaptureSession -5484987");
-                                if (param.args[1] != null) {
-                                    process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[1]);
-                                }
+                XposedHelpers.findAndHookMethod(param.args[0].getClass(), "createConstrainedHighSpeedCaptureSession", List.class, CameraCaptureSession.StateCallback.class, Handler.class, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        super.beforeHookedMethod(param);
+                        if (param.args[0] != null) {
+                            param.args[0] = Arrays.asList(c2_virtual_surface);
+                            XposedBridge.log("[ShuzukoCamera] Hook createConstrainedHighSpeedCaptureSession");
+                            if (param.args[1] != null) {
+                                process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[1]);
                             }
                         }
-                    });
+                    }
+                });
 
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -996,7 +1000,7 @@ public class HookMain implements IXposedHookLoadPackage {
                             super.beforeHookedMethod(param);
                             if (param.args[1] != null) {
                                 param.args[1] = Arrays.asList(c2_virtual_surface);
-                                XposedBridge.log("【VCAM】执行了 createReprocessableCaptureSession ");
+                                XposedBridge.log("[ShuzukoCamera] Hook createReprocessableCaptureSession");
                                 if (param.args[2] != null) {
                                     process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[2]);
                                 }
@@ -1014,7 +1018,7 @@ public class HookMain implements IXposedHookLoadPackage {
                             if (param.args[1] != null) {
                                 outputConfiguration = new OutputConfiguration(c2_virtual_surface);
                                 param.args[0] = Arrays.asList(outputConfiguration);
-                                XposedBridge.log("【VCAM】执行了 createReprocessableCaptureSessionByConfigurations");
+                                XposedBridge.log("[ShuzukoCamera] Hook createReprocessableCaptureSessionByConfigurations");
                                 if (param.args[2] != null) {
                                     process_camera2Session_callback((CameraCaptureSession.StateCallback) param.args[2]);
                                 }
@@ -1029,7 +1033,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                             super.beforeHookedMethod(param);
                             if (param.args[0] != null) {
-                                XposedBridge.log("【VCAM】执行了 createCaptureSession -5484987");
+                                XposedBridge.log("[ShuzukoCamera] Hook createCaptureSession (SessionConfiguration)");
                                 sessionConfiguration = (SessionConfiguration) param.args[0];
                                 outputConfiguration = new OutputConfiguration(c2_virtual_surface);
                                 fake_sessionConfiguration = new SessionConfiguration(sessionConfiguration.getSessionType(),
@@ -1049,7 +1053,7 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(hooked_class, "onError", CameraDevice.class, int.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                XposedBridge.log("【VCAM】相机错误onerror：" + (int) param.args[1]);
+                XposedBridge.log("[ShuzukoCamera] Camera onError: " + (int) param.args[1]);
             }
 
         });
@@ -1058,7 +1062,7 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(hooked_class, "onDisconnected", CameraDevice.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                XposedBridge.log("【VCAM】相机断开onDisconnected ：");
+                XposedBridge.log("[ShuzukoCamera] Camera onDisconnected");
             }
 
         });
@@ -1068,9 +1072,9 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private void process_a_shot_jpeg(XC_MethodHook.MethodHookParam param, int index) {
         try {
-            XposedBridge.log("【VCAM】第二个jpeg:" + param.args[index].toString());
+            XposedBridge.log("[ShuzukoCamera] Callback JPEG: " + param.args[index].toString());
         } catch (Exception eee) {
-            XposedBridge.log("【VCAM】" + eee);
+            XposedBridge.log("[ShuzukoCamera] " + eee);
 
         }
         Class callback = param.args[index].getClass();
@@ -1083,14 +1087,14 @@ public class HookMain implements IXposedHookLoadPackage {
                     onemwidth = loaclcam.getParameters().getPreviewSize().width;
                     onemhight = loaclcam.getParameters().getPreviewSize().height;
                     saveCameraResolution(onemwidth, onemhight, currentPackageName, "Camera1-PictureJPEG");
-                    XposedBridge.log("【VCAM】JPEG拍照回调初始化：宽：" + onemwidth + "高：" + onemhight + "对应的类：" + loaclcam.toString());
+                    XposedBridge.log("[ShuzukoCamera] JPEG callback khởi tạo: " + onemwidth + "x" + onemhight);
                     File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "发现拍照\n宽：" + onemwidth + "\n高：" + onemhight + "\n格式：JPEG", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(toast_content, "[Shuzuko Camera] Đang chụp ảnh JPEG:\n" + onemwidth + " x " + onemhight, Toast.LENGTH_SHORT).show();
                         } catch (Exception e) {
-                            XposedBridge.log("【VCAM】[toast]" + e.toString());
+                            XposedBridge.log("[ShuzukoCamera][toast]" + e.toString());
                         }
                     }
                     File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
@@ -1113,7 +1117,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         }
                     }
                 } catch (Exception ee) {
-                    XposedBridge.log("【VCAM】" + ee.toString());
+                    XposedBridge.log("[ShuzukoCamera] " + ee.toString());
                 }
             }
         });
@@ -1121,9 +1125,9 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private void process_a_shot_YUV(XC_MethodHook.MethodHookParam param) {
         try {
-            XposedBridge.log("【VCAM】发现拍照YUV:" + param.args[1].toString());
+            XposedBridge.log("[ShuzukoCamera] Chụp ảnh YUV: " + param.args[1].toString());
         } catch (Exception eee) {
-            XposedBridge.log("【VCAM】" + eee);
+            XposedBridge.log("[ShuzukoCamera] " + eee);
         }
         Class callback = param.args[1].getClass();
         XposedHelpers.findAndHookMethod(callback, "onPictureTaken", byte[].class, android.hardware.Camera.class, new XC_MethodHook() {
@@ -1134,14 +1138,14 @@ public class HookMain implements IXposedHookLoadPackage {
                     onemwidth = loaclcam.getParameters().getPreviewSize().width;
                     onemhight = loaclcam.getParameters().getPreviewSize().height;
                     saveCameraResolution(onemwidth, onemhight, currentPackageName, "Camera1-PictureYUV");
-                    XposedBridge.log("【VCAM】YUV拍照回调初始化：宽：" + onemwidth + "高：" + onemhight + "对应的类：" + loaclcam.toString());
+                    XposedBridge.log("[ShuzukoCamera] YUV callback khởi tạo: " + onemwidth + "x" + onemhight);
                     File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "发现拍照\n宽：" + onemwidth + "\n高：" + onemhight + "\n格式：YUV_420_888", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(toast_content, "[Shuzuko Camera] Đang chụp ảnh YUV:\n" + onemwidth + " x " + onemhight, Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
+                            XposedBridge.log("[ShuzukoCamera][toast]" + ee.toString());
                         }
                     }
                     File control_file = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "disable.jpg");
@@ -1161,7 +1165,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         }
                     }
                 } catch (Exception ee) {
-                    XposedBridge.log("【VCAM】" + ee.toString());
+                    XposedBridge.log("[ShuzukoCamera] " + ee.toString());
                 }
             }
         });
@@ -1180,9 +1184,9 @@ public class HookMain implements IXposedHookLoadPackage {
         if (!file.exists()) {
             if (toast_content != null && need_to_show_toast) {
                 try {
-                    Toast.makeText(toast_content, "不存在替换视频\n" + toast_content.getPackageName() + "当前路径：" + video_path, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(toast_content, "[Shuzuko Camera] Chưa có video/ảnh ảo!\nĐường dẫn: " + video_path + "virtual.mp4", Toast.LENGTH_SHORT).show();
                 } catch (Exception ee) {
-                    XposedBridge.log("【VCAM】[toast]" + ee);
+                    XposedBridge.log("[ShuzukoCamera][toast]" + ee);
                 }
             }
             need_stop = 1;
@@ -1203,14 +1207,14 @@ public class HookMain implements IXposedHookLoadPackage {
                     mhight = camera_onPreviewFrame.getParameters().getPreviewSize().height;
                     saveCameraResolution(mwidth, mhight, currentPackageName, "Camera1-PreviewCallback");
                     int frame_Rate = camera_onPreviewFrame.getParameters().getPreviewFrameRate();
-                    XposedBridge.log("【VCAM】帧预览回调初始化：宽：" + mwidth + " 高：" + mhight + " 帧率：" + frame_Rate);
+                    XposedBridge.log("[ShuzukoCamera] Khung ngắm xem trước: " + mwidth + "x" + mhight + " @" + frame_Rate + "fps");
                     File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/ShuzukoCamera/" + "no_toast.jpg");
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "发现预览\n宽：" + mwidth + "\n高：" + mhight + "\n" + "需要视频分辨率与其完全相同", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(toast_content, "[Shuzuko Camera] Đã nhận diện khung ngắm Camera1:\n" + mwidth + " x " + mhight, Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
-                            XposedBridge.log("【VCAM】[toast]" + ee.toString());
+                            XposedBridge.log("[ShuzukoCamera][toast]" + ee.toString());
                         }
                     }
                     if (finalNeed_stop == 1) {
@@ -1239,7 +1243,7 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(callback_calss.getClass(), "onConfigureFailed", CameraCaptureSession.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                XposedBridge.log("【VCAM】onConfigureFailed ：" + param.args[0].toString());
+                XposedBridge.log("[ShuzukoCamera] onConfigureFailed: " + param.args[0].toString());
             }
 
         });
@@ -1247,28 +1251,27 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(callback_calss.getClass(), "onConfigured", CameraCaptureSession.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                XposedBridge.log("【VCAM】onConfigured ：" + param.args[0].toString());
+                XposedBridge.log("[ShuzukoCamera] onConfigured: " + param.args[0].toString());
             }
         });
 
         XposedHelpers.findAndHookMethod( callback_calss.getClass(), "onClosed", CameraCaptureSession.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                XposedBridge.log("【VCAM】onClosed ："+ param.args[0].toString());
+                XposedBridge.log("[ShuzukoCamera] onClosed: "+ param.args[0].toString());
             }
         });
     }
 
 
 
-    //以下代码来源：https://blog.csdn.net/jacke121/article/details/73888732
+    // Source: https://blog.csdn.net/jacke121/article/details/73888732
     private Bitmap getBMP(String file) throws Throwable {
         return BitmapFactory.decodeFile(file);
     }
 
     private static byte[] rgb2YCbCr420(int[] pixels, int width, int height) {
         int len = width * height;
-        // yuv格式数组大小，y亮度占len长度，u,v各占len/4长度。
         byte[] yuv = new byte[len * 3 / 2];
         int y, u, v;
         for (int i = 0; i < height; i++) {
@@ -1277,14 +1280,13 @@ public class HookMain implements IXposedHookLoadPackage {
                 int r = rgb & 0xFF;
                 int g = (rgb >> 8) & 0xFF;
                 int b = (rgb >> 16) & 0xFF;
-                // 套用公式
+                // RGB to YUV formula
                 y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
                 u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
                 v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
                 y = y < 16 ? 16 : (Math.min(y, 255));
                 u = u < 0 ? 0 : (Math.min(u, 255));
                 v = v < 0 ? 0 : (Math.min(v, 255));
-                // 赋值
                 yuv[i * width + j] = (byte) y;
                 yuv[len + (i >> 1) * width + (j & ~1)] = (byte) u;
                 yuv[len + +(i >> 1) * width + (j & ~1) + 1] = (byte) v;
