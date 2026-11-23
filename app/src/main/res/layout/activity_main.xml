@@ -28,32 +28,53 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/rotation_label"
+            android:text="🔄 Hướng xoay ảnh (Quan trọng cho TikTok / Zalo):"
             android:textSize="14sp"
             android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
+            android:textColor="#1565C0"
+            android:layout_marginBottom="2dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="💡 Nếu vào TikTok/Zalo thấy camera bị xoay ngang 90°, hãy chọn '270°'!"
+            android:textSize="12sp"
+            android:textColor="#C62828"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
 
         <RadioGroup
             android:id="@+id/radioGroupRotation"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:layout_marginBottom="8dp">
 
             <RadioButton
-                android:id="@+id/radioRotate0"
-                android:layout_width="0dp"
+                android:id="@+id/radioRotate270"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/rotate_0"
-                android:checked="true" />
+                android:text="270° (Khuyên dùng cho TikTok/Zalo - Sửa lỗi xoay 90°)"
+                android:checked="true"
+                android:textStyle="bold" />
 
             <RadioButton
-                android:id="@+id/radioRotate270"
-                android:layout_width="0dp"
+                android:id="@+id/radioRotate0"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/rotate_270" />
+                android:text="0° (Gốc - Không xoay)" />
+
+            <RadioButton
+                android:id="@+id/radioRotate90"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="90° (Xoay phải 90° theo chiều KĐH)" />
+
+            <RadioButton
+                android:id="@+id/radioRotate180"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="180° (Lộn ngược 180°)" />
 
         </RadioGroup>
 
@@ -118,6 +139,26 @@
             android:text="@string/video_status"
             android:textSize="14sp"
             android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/txtPreviewTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="👁️ Xem trước ảnh thay thế hiện tại:"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone" />
+
+        <ImageView
+            android:id="@+id/imgPreview"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:layout_marginBottom="12dp"
+            android:background="#15000000"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
 
         <View
             android:layout_width="match_parent"

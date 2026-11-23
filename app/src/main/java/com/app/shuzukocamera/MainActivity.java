@@ -10,6 +10,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
@@ -19,9 +20,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.util.Log;
+import android.view.View;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.Switch;
@@ -40,7 +43,7 @@ public class MainActivity extends Activity {
     
     private int targetWidth = 2400;  // Default width
     private int targetHeight = 1080; // Default height
-    private int rotationDegrees = 0; // Default no rotation
+    private int rotationDegrees = 270; // Default 270 degrees for portrait camera apps (TikTok, Zalo)
     private boolean useCenterCrop = true; // Default center crop
 
     private Switch force_show_switch;
@@ -128,13 +131,32 @@ public class MainActivity extends Activity {
         sync_statue_with_files();
         updateFileStatus();
 
+        RadioButton radioRotate0 = findViewById(R.id.radioRotate0);
+        RadioButton radioRotate90 = findViewById(R.id.radioRotate90);
+        RadioButton radioRotate180 = findViewById(R.id.radioRotate180);
+        RadioButton radioRotate270 = findViewById(R.id.radioRotate270);
+
+        android.content.SharedPreferences prefs = getSharedPreferences("ShuzukoPrefs", MODE_PRIVATE);
+        rotationDegrees = prefs.getInt("rotation_degrees", 270);
+        if (rotationDegrees == 0 && radioRotate0 != null) radioRotate0.setChecked(true);
+        else if (rotationDegrees == 90 && radioRotate90 != null) radioRotate90.setChecked(true);
+        else if (rotationDegrees == 180 && radioRotate180 != null) radioRotate180.setChecked(true);
+        else if (radioRotate270 != null) radioRotate270.setChecked(true);
+
         // Rotation listener
         radioGroupRotation.setOnCheckedChangeListener((group, checkedId) -> {
             if (checkedId == R.id.radioRotate0) {
                 rotationDegrees = 0;
+            } else if (checkedId == R.id.radioRotate90) {
+                rotationDegrees = 90;
+            } else if (checkedId == R.id.radioRotate180) {
+                rotationDegrees = 180;
             } else if (checkedId == R.id.radioRotate270) {
                 rotationDegrees = 270;
             }
+            getSharedPreferences("ShuzukoPrefs", MODE_PRIVATE)
+                    .edit().putInt("rotation_degrees", rotationDegrees).apply();
+            Toast.makeText(this, "Đã chọn " + rotationDegrees + "°. Bấm 'Chọn Ảnh Thay Thế' để cập nhật!", Toast.LENGTH_SHORT).show();
         });
 
         // Scale mode listener
@@ -473,6 +495,22 @@ public class MainActivity extends Activity {
         } else {
             txtVideoStatus.setText("Khung xem trước: Chưa tạo video");
         }
+
+        ImageView imgPreview = findViewById(R.id.imgPreview);
+        TextView txtPreviewTitle = findViewById(R.id.txtPreviewTitle);
+        if (imageFile.exists() && imgPreview != null && txtPreviewTitle != null) {
+            try {
+                Bitmap bmp = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
+                if (bmp != null) {
+                    imgPreview.setImageBitmap(bmp);
+                    imgPreview.setVisibility(View.VISIBLE);
+                    txtPreviewTitle.setVisibility(View.VISIBLE);
+                }
+            } catch (Throwable ignored) {}
+        } else if (imgPreview != null && txtPreviewTitle != null) {
+            imgPreview.setVisibility(View.GONE);
+            txtPreviewTitle.setVisibility(View.GONE);
+        }
     }
 
     private void checkAllPaths() {
@@ -661,17 +699,28 @@ public class MainActivity extends Activity {
         
         MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, targetWidth, targetHeight);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 2000000);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 15000000); // 15 Mbps for crisp HD sharpness
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+        try {
+            format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh);
+        } catch (Throwable ignored) {}
+        try {
+            format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
+        } catch (Throwable ignored) {}
 
         MediaCodec codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         android.view.Surface surface = codec.createInputSurface();
         codec.start();
 
+        Paint paint = new Paint();
+        paint.setFilterBitmap(true);
+        paint.setAntiAlias(true);
+        paint.setDither(true);
+
         Canvas canvas = surface.lockCanvas(null);
-        canvas.drawBitmap(bitmap, 0, 0, null);
+        canvas.drawBitmap(bitmap, 0, 0, paint);
         surface.unlockCanvasAndPost(canvas);
 
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
@@ -851,27 +900,46 @@ public class MainActivity extends Activity {
             camera1Dir.mkdirs();
         }
 
-        // Decode image
+        // Decode image with ARGB_8888 for best quality
         Bitmap original;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inPreferredConfig = Bitmap.Config.ARGB_8888;
         try (InputStream inputStream = getContentResolver().openInputStream(imageUri)) {
             if (inputStream == null) {
                 throw new IOException("Cannot open image");
             }
-            original = BitmapFactory.decodeStream(inputStream);
+            original = BitmapFactory.decodeStream(inputStream, null, options);
             if (original == null) {
                 throw new IOException("Cannot decode image");
             }
         }
 
+        // Check EXIF orientation from original file
+        int exifRotation = 0;
+        try (InputStream exifStream = getContentResolver().openInputStream(imageUri)) {
+            if (exifStream != null) {
+                android.media.ExifInterface exif = new android.media.ExifInterface(exifStream);
+                int orientation = exif.getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL);
+                if (orientation == android.media.ExifInterface.ORIENTATION_ROTATE_90) {
+                    exifRotation = 90;
+                } else if (orientation == android.media.ExifInterface.ORIENTATION_ROTATE_180) {
+                    exifRotation = 180;
+                } else if (orientation == android.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                    exifRotation = 270;
+                }
+            }
+        } catch (Throwable ignored) {}
+
         Log.d("MainActivity", "Original image: " + original.getWidth() + "x" + original.getHeight());
-        Log.d("MainActivity", "Rotation: " + rotationDegrees + "°");
+        Log.d("MainActivity", "EXIF rotation: " + exifRotation + "°, User rotation: " + rotationDegrees + "°");
         Log.d("MainActivity", "Scale mode: " + (useCenterCrop ? "Center Crop" : "Stretch"));
 
-        // Rotate if needed
+        // Total rotation = EXIF rotation + user-selected rotation
+        int totalRotation = (exifRotation + rotationDegrees) % 360;
         Bitmap rotated = original;
-        if (rotationDegrees != 0) {
+        if (totalRotation != 0) {
             android.graphics.Matrix matrix = new android.graphics.Matrix();
-            matrix.postRotate(rotationDegrees);
+            matrix.postRotate(totalRotation);
             rotated = Bitmap.createBitmap(original, 0, 0, original.getWidth(), original.getHeight(), matrix, true);
             if (rotated != original) {
                 original.recycle();
@@ -879,8 +947,7 @@ public class MainActivity extends Activity {
             Log.d("MainActivity", "After rotation: " + rotated.getWidth() + "x" + rotated.getHeight());
         }
 
-        // Target dimensions - NO SWAP after rotation!
-        // After rotation, the bitmap is already in correct orientation
+        // Target dimensions
         int finalWidth = targetWidth;
         int finalHeight = targetHeight;
 
